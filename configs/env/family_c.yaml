@@ -1,0 +1,8 @@
+# @package _global_
+env:
+  N: 12
+  mu_mode: fixed
+  mu_fixed: [0.3, 0.3, 0.3, 0.3, 1.0, 1.0, 1.0, 1.0, 3.0, 3.0, 3.0, 3.0]
+  lam: 1.0
+  rho_target: 0.75
+  horizon_T: 3000.0

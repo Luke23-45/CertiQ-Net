@@ -1,0 +1,7 @@
+# @package _global_
+adapter:
+  _target_: certiqnet.adapters.moe.MoEAdapter
+  certificate_status: approximate
+  expert_throughput_mode: estimated
+  token_group_size: 4
+  assumptions_satisfied: false

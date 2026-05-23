@@ -1,0 +1,21 @@
+defaults:
+  - model: certiqnet_s
+  - env: family_a
+  - adapter: queueing
+  - trainer: default
+  - logger: wandb
+  - callbacks: default
+  - _self_
+
+project:
+  name: certiqnet-z2
+  seed: 42
+  log_dir: ${hydra:runtime.output_dir}
+
+loss:
+  omega_bc: 1.0
+  omega_gate: 0.1
+  omega_drift: 5.0
+  omega_res: 0.01
+  omega_ent: -0.001
+  rollout_weight: 1.0

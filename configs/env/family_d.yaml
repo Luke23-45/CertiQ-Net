@@ -1,0 +1,8 @@
+# @package _global_
+env:
+  N: 5
+  mu_mode: lognormal
+  mu_lognormal_sigma: 0.4
+  lam: 1.0
+  rho_target: 0.70
+  horizon_T: 5000.0

@@ -1,0 +1,5 @@
+# @package _global_
+adapter:
+  _target_: certiqnet.adapters.queueing.QueueingAdapter
+  certificate_status: exact
+  assumptions_satisfied: true
