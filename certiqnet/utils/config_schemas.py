@@ -8,8 +8,6 @@ from omegaconf import MISSING
 
 @dataclass
 class BackboneConfig:
-    """Analytic backbone parameter constraints and initial values."""
-
     alpha_min: float = 1e-3
     beta_min: float = 1e-3
     alpha_init: float = 1.0
@@ -21,8 +19,6 @@ class BackboneConfig:
 
 @dataclass
 class EncoderConfig:
-    """Permutation-equivariant encoder configuration."""
-
     d_local: int = 64
     d_global: int = 64
     n_layers_local: int = 2
@@ -33,22 +29,16 @@ class EncoderConfig:
 
 @dataclass
 class ResidualConfig:
-    """Bounded residual configuration."""
-
     R_max: float = 2.0
 
 
 @dataclass
 class GateConfig:
-    """Raw scalar gate configuration."""
-
     eta_max: float = 1.0
 
 
 @dataclass
 class CertiQNetSConfig:
-    """Hard-tail fallback model configuration."""
-
     _target_: str = "certiqnet.models.certiqnet_s.CertiQNetS"
     backbone: BackboneConfig = field(default_factory=BackboneConfig)
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
@@ -61,8 +51,6 @@ class CertiQNetSConfig:
 
 @dataclass
 class CertiQNetPConfig:
-    """Drift-envelope projection model configuration."""
-
     _target_: str = "certiqnet.models.certiqnet_p.CertiQNetP"
     backbone: BackboneConfig = field(default_factory=BackboneConfig)
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
@@ -74,8 +62,6 @@ class CertiQNetPConfig:
 
 @dataclass
 class EnvConfig:
-    """CTMC environment configuration."""
-
     N: int = MISSING
     lam: float = MISSING
     mu_mode: str = MISSING
@@ -87,8 +73,6 @@ class EnvConfig:
 
 @dataclass
 class TrainerConfig:
-    """Lightning trainer and optimizer configuration."""
-
     max_epochs: int = 200
     accelerator: str = "auto"
     devices: int = 1
@@ -102,8 +86,6 @@ class TrainerConfig:
 
 @dataclass
 class LossConfig:
-    """Loss weights. ``omega_ent < 0`` means entropy bonus."""
-
     omega_bc: float = 1.0
     omega_gate: float = 0.1
     omega_drift: float = 5.0
@@ -113,11 +95,37 @@ class LossConfig:
 
 
 @dataclass
-class RootConfig:
-    """Top-level Hydra configuration."""
+class ProgressConfig:
+    new_line_after_iteration: bool = True
+    mininterval: float = 0.1
+    maxinterval: float = 1.0
+    miniters: int | None = None
+    smoothing: float = 0.3
+    dynamic_ncols: bool = True
+    leave: bool = False
+    position: int = 0
+    unit: str = "it"
+    bar_format: str | None = None
+    ascii: bool = False
+    ncols: int | None = None
 
+
+@dataclass
+class SweepConfig:
+    seeds: tuple[int, ...] = (0, 1, 2)
+    models: tuple[str, ...] = (
+        "certiqnet_s", "certiqnet_p", "backbone_only", "certiqnet_x_ablation"
+    )
+    envs: tuple[str, ...] = ("family_a", "family_b", "family_c", "family_e")
+
+
+@dataclass
+class RootConfig:
     project: dict[str, Any] = MISSING
     model: Any = MISSING
     env: EnvConfig = MISSING
     trainer: TrainerConfig = field(default_factory=TrainerConfig)
     loss: LossConfig = field(default_factory=LossConfig)
+    progress: ProgressConfig = field(default_factory=ProgressConfig)
+    sweep: SweepConfig = field(default_factory=SweepConfig)
+    experiment_family: str = "main_queueing"

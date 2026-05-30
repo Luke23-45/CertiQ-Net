@@ -1,0 +1,5 @@
+# @package _global_
+model:
+  _target_: certiqnet.models.baselines.JoinShortestWeightedQueue
+  beta: 1.0
+  C_B: .inf

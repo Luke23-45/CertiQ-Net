@@ -3,4 +3,5 @@ adapter:
   _target_: certiqnet.adapters.robotics.RoboticsAdapter
   certificate_status: empirical
   travel_time_mode: constant
+  workspace_size: 100.0
   assumptions_satisfied: false

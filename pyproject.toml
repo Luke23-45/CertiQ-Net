@@ -45,10 +45,13 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "ANN"]
-ignore = []
+ignore = ["UP017"]
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*.py" = ["E402"]
+"certiqnet/utils/progress.py" = ["ANN401"]
+"studies/**/*.py" = ["E402", "UP035", "UP006", "ANN002", "ANN003"]
+"certiqnet/utils/config_schemas.py" = ["F821"]
 
 [tool.mypy]
 python_version = "3.11"

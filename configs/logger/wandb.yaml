@@ -4,6 +4,7 @@ logger:
   project: certiqnet-z2
   entity: ${oc.env:WANDB_ENTITY,null}
   save_dir: ${hydra:runtime.output_dir}
+  mode: offline
   log_model: true
   tags:
     - z2

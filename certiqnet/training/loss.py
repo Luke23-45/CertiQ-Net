@@ -15,9 +15,13 @@ class CertiQNetLoss(nn.Module):
         super().__init__()
         self.cfg = loss_cfg
 
-    def rollout_cost(self, Q: Tensor, mu: Tensor, pi: Tensor) -> Tensor:
+    def rollout_cost(
+        self, Q: Tensor, mu: Tensor, pi: Tensor, cost: Tensor | None = None
+    ) -> Tensor:
         """Empirical average queue length objective."""
         del mu, pi
+        if cost is not None:
+            return cost.float().mean()
         return Q.sum(dim=-1).mean()
 
     def bc_loss(self, pi: Tensor, p_target: Tensor | None = None) -> Tensor:
@@ -43,10 +47,16 @@ class CertiQNetLoss(nn.Module):
         return -(pi * pi.clamp_min(1e-8).log()).sum(dim=-1).mean()
 
     def forward(
-        self, Q: Tensor, mu: Tensor, pi: Tensor, diag: CertificateDiagnostics, cfg: LossConfig
+        self,
+        Q: Tensor,
+        mu: Tensor,
+        pi: Tensor,
+        diag: CertificateDiagnostics,
+        cfg: LossConfig,
+        cost: Tensor | None = None,
     ) -> dict[str, Tensor]:
         """Return all scalar loss components and total."""
-        J = self.rollout_cost(Q, mu, pi)
+        J = self.rollout_cost(Q, mu, pi, cost)
         L_bc = self.bc_loss(pi)
         L_gate = self.gate_penalty(diag.eta_final)
         L_drift = self.drift_penalty(diag)

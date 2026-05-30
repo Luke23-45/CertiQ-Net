@@ -1,0 +1,13 @@
+defaults:
+  - /model: backbone_only
+  - /env: family_a
+  - /adapter: queueing
+  - /trainer: fast_dev
+  - /logger: csv
+  - /callbacks: default
+  - /progress: default
+
+runner:
+  rollout_steps: 1000
+  rollout_batch_size: 32
+  show_progress: true

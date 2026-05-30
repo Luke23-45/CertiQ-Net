@@ -5,12 +5,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import hydra
 import torch
+from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
 from certiqnet.diagnostics.state_bank import generate_state_bank
@@ -21,7 +22,7 @@ from certiqnet.utils.progress import configure_progress
 from scripts.train import build_model, build_mu
 
 
-@hydra.main(version_base="1.3", config_path="../configs", config_name="config")
+@hydra.main(version_base="1.3", config_path="../configs", config_name="config")  # type: ignore[untyped-decorator]
 def main(cfg: DictConfig) -> None:
     platform_info = detect_platform()
 
@@ -34,8 +35,10 @@ def main(cfg: DictConfig) -> None:
                     torch=platform_info.torch_version,
                     gpu=platform_info.gpu_count)
 
+    adapter = instantiate(cfg.adapter) if "adapter" in cfg else None
+    d_xi = int(getattr(adapter, "context_dim", 0))
     mu, lam = build_mu(cfg)
-    model = build_model(cfg, N=int(cfg.env.N))
+    model = build_model(cfg, N=int(cfg.env.N), d_xi=d_xi)
     model.eval()
 
     run_logger.info("generating_state_bank")
@@ -51,8 +54,12 @@ def main(cfg: DictConfig) -> None:
     run_logger.info("state_bank_generated", states=Q_bank.shape[0])
 
     mu_bank = mu.unsqueeze(0).expand(Q_bank.shape[0], -1)
+    if adapter is not None:
+        Q_bank, mu_bank, xi_bank = adapter.make_observation(Q_bank, mu_bank)
+    else:
+        xi_bank = None
     with torch.no_grad():
-        _, diag = model(Q_bank, mu_bank, training_mode=False)
+        _, diag = model(Q_bank, mu_bank, xi_bank, training_mode=False)
 
     violation = (diag.A_pi - diag.B_Q).clamp(min=0.0)
     audit_metrics = aggregate_metrics(

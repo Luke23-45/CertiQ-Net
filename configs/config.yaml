@@ -5,12 +5,29 @@ defaults:
   - trainer: default
   - logger: wandb
   - callbacks: default
+  - progress: default
   - _self_
 
 project:
   name: certiqnet-z2
   seed: 42
+  output_root: outputs
+  experiment_name: null
+  run_id: null
+  resume_from_checkpoint: null
   log_dir: ${hydra:runtime.output_dir}
+  save_checkpoints: true
+
+runner:
+  rollout_steps: 1000
+  rollout_batch_size: 32
+  max_backlog: 1000000.0
+  show_progress: true
+
+sweep:
+  seeds: [2] # [0, 1, 2]
+  models: [certiqnet_s, certiqnet_p, backbone_only, certiqnet_x_ablation]
+  envs: [family_a, family_b, family_c, family_e]
 
 loss:
   omega_bc: 1.0

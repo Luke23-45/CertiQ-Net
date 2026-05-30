@@ -1,0 +1,14 @@
+# @package _global_
+progress:
+  new_line_after_iteration: true
+  mininterval: 0.1
+  maxinterval: 1.0
+  miniters: null
+  smoothing: 0.3
+  dynamic_ncols: true
+  leave: false
+  position: 0
+  unit: it
+  bar_format: null
+  ascii: false
+  ncols: null
