@@ -16,6 +16,14 @@ from certiqnet.experiments.paths import (
 )
 
 
+def _optional_text(value: object) -> str:
+    """Return a usable string for optional config values."""
+    if value is None:
+        return ""
+    text = str(value).strip()
+    return "" if text.lower() == "none" else text
+
+
 def experiment_name_from_cfg(cfg: DictConfig) -> str:
     """Build deterministic experiment name from composed Hydra config."""
     model_name = str(cfg.model._target_).split(".")[-1]
@@ -34,11 +42,14 @@ def prepare_run(
     output_root: Path | None = None,
 ) -> tuple[RunPaths, ExperimentLogger]:
     """Create run directories, resolved config, manifest, and logger."""
-    experiment_name = str(cfg.project.get("experiment_name", "")) or experiment_name_from_cfg(cfg)
-    run_id = str(cfg.project.get("run_id", "")) or make_run_id(
-        experiment_name, int(cfg.project.seed)
-    )
-    root = output_root or Path(str(cfg.project.get("output_root", "outputs")))
+    experiment_name = _optional_text(cfg.project.get("experiment_name", None))
+    if not experiment_name:
+        experiment_name = experiment_name_from_cfg(cfg)
+    run_id = _optional_text(cfg.project.get("run_id", None))
+    if not run_id:
+        run_id = make_run_id(experiment_name, int(cfg.project.seed))
+    output_root_value = _optional_text(cfg.project.get("output_root", "outputs")) or "outputs"
+    root = output_root or Path(output_root_value)
     paths = create_run_paths(root, experiment_name, run_id)
     save_resolved_config(cfg, paths)
     save_manifest(cfg, paths, experiment_name, run_id, cwd)

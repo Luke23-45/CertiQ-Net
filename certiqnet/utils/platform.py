@@ -127,5 +127,7 @@ def resolve_trainer_config(
 def resolve_num_workers(requested: int | None, platform_info: PlatformInfo | None = None) -> int:
     info = platform_info or detect_platform()
     if requested is None or requested < 0:
+        if "google.colab" in sys.modules or "ipykernel" in sys.modules:
+            return 0
         return info.safe_num_workers
     return min(requested, info.safe_num_workers)
