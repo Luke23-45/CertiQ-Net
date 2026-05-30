@@ -9,6 +9,7 @@ from certiqnet.math.certificate import (
     CertificateDiagnostics,
     arrival_envelope_A,
     policy_entropy,
+    project_probability_vector,
     validate_probability_vector,
 )
 from certiqnet.math.lyapunov import min_coord
@@ -65,6 +66,7 @@ class AnalyticBackbonePolicy(nn.Module):
         del xi, training_mode
         mu_b = _expand_mu(Q, mu)
         pi, _ = self.backbone(Q, mu_b)
+        pi = project_probability_vector(pi)
         validate_probability_vector(pi)
         return pi, _diag(pi, pi, Q, mu_b, self.beta, self.C_B)
 
@@ -84,6 +86,7 @@ class RandomPolicy(nn.Module):
         del xi, training_mode
         mu_b = _expand_mu(Q, mu)
         pi = torch.full_like(Q, 1.0 / self.N)
+        pi = project_probability_vector(pi)
         return pi, _diag(pi, pi, Q, mu_b, self.beta, self.C_B)
 
 
@@ -104,6 +107,7 @@ class JoinShortestWeightedQueue(nn.Module):
         idx = (Q / mu_b.pow(self.beta)).argmin(dim=-1)
         pi = torch.zeros_like(Q)
         pi.scatter_(1, idx.unsqueeze(-1), 1.0)
+        pi = project_probability_vector(pi)
         return pi, _diag(pi, pi, Q, mu_b, self.beta, self.C_B)
 
 

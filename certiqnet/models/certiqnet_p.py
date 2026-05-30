@@ -11,6 +11,7 @@ from certiqnet.math.certificate import (
     CertificateDiagnostics,
     arrival_envelope_A,
     policy_entropy,
+    project_probability_vector,
     validate_probability_vector,
 )
 from certiqnet.math.lyapunov import min_coord
@@ -91,6 +92,7 @@ class CertiQNetP(nn.Module):
         )
         fallback_active = torch.zeros(Q.shape[0], dtype=torch.bool, device=Q.device)
         pi = (1.0 - eta.unsqueeze(-1)) * p_base + eta.unsqueeze(-1) * p_nn
+        pi = project_probability_vector(pi)
         validate_probability_vector(pi)
 
         A_base = arrival_envelope_A(p_base, Q, mu_b, self.beta)

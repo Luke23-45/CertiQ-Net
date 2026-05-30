@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import random
 import math
+import shutil
 from pathlib import Path
 
 import torch
@@ -197,6 +198,13 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
     resume = cfg.project.get("resume_from_checkpoint")
     run_logger.info("starting_training", checkpoint=str(resume) if resume else None)
     trainer.fit(lightning, datamodule=dm, ckpt_path=str(resume) if resume else None)
+
+    if logger is not False and hasattr(logger, "log_dir"):
+        lightning_metrics = Path(str(getattr(logger, "log_dir")))
+        source_metrics = lightning_metrics / "metrics.csv"
+        if source_metrics.exists():
+            shutil.copyfile(source_metrics, paths.metrics / "training_metrics.csv")
+
     ckpt_path = paths.artifacts / "final_model_state.pt"
     torch.save(model.state_dict(), ckpt_path)
     manifest_path = paths.root / "manifest.json"
