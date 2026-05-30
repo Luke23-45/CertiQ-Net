@@ -106,7 +106,7 @@ class ProgressConfig:
     position: int = 0
     unit: str = "it"
     bar_format: str | None = None
-    ascii: bool = False
+    ascii: bool = True
     ncols: int | None = None
 
 

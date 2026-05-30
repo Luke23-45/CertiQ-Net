@@ -10,5 +10,5 @@ progress:
   position: 0
   unit: it
   bar_format: null
-  ascii: false
+  ascii: true
   ncols: null

@@ -1,5 +1,5 @@
 # @package _global_
 logger:
   _target_: pytorch_lightning.loggers.CSVLogger
-  save_dir: ${hydra:runtime.output_dir}
+  save_dir: null
   name: csv

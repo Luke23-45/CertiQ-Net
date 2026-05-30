@@ -24,7 +24,7 @@ class ProgressConfig:
     position: int = 0
     unit: str = "it"
     bar_format: str | None = None
-    ascii: bool = False
+    ascii: bool = True
     ncols: int | None = None
 
 
@@ -59,11 +59,12 @@ class RobustProgressBar:
         disable: bool = False,
         **kwargs: Any,
     ) -> Iterator[T]:
+        effective_disable = disable or not sys.stdout.isatty()
         bar = tqdm(
             iterable,
             total=total,
             desc=desc,
-            disable=disable,
+            disable=effective_disable,
             mininterval=kwargs.pop("mininterval", self.cfg.mininterval),
             maxinterval=kwargs.pop("maxinterval", self.cfg.maxinterval),
             miniters=kwargs.pop("miniters", self.cfg.miniters),
@@ -82,9 +83,12 @@ class RobustProgressBar:
             yield from bar
         finally:
             bar.close()
-            if not disable and self.cfg.new_line_after_iteration:
-                sys.stdout.write("\n")
-                sys.stdout.flush()
+            if not effective_disable and self.cfg.new_line_after_iteration:
+                try:
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                except OSError:
+                    pass
 
 
 _PROGRESS_BAR_INSTANCE: RobustProgressBar | None = None

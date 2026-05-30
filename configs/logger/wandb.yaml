@@ -3,7 +3,7 @@ logger:
   _target_: pytorch_lightning.loggers.WandbLogger
   project: certiqnet-z2
   entity: ${oc.env:WANDB_ENTITY,null}
-  save_dir: ${hydra:runtime.output_dir}
+  save_dir: null
   mode: offline
   log_model: true
   tags:

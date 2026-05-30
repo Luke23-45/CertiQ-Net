@@ -6,7 +6,7 @@ project:
   experiment_name: null
   run_id: null
   resume_from_checkpoint: null
-  log_dir: ${hydra:runtime.output_dir}
+  log_dir: null
   save_checkpoints: true
 
 runner:
@@ -18,3 +18,10 @@ runner:
 domain: queueing
 metric_schema: queueing
 
+loss:
+  omega_bc: 1.0
+  omega_gate: 0.1
+  omega_drift: 5.0
+  omega_res: 0.01
+  omega_ent: -0.001
+  rollout_weight: 1.0

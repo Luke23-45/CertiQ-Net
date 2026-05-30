@@ -15,7 +15,7 @@ project:
   experiment_name: null
   run_id: null
   resume_from_checkpoint: null
-  log_dir: ${hydra:runtime.output_dir}
+  log_dir: null
   save_checkpoints: true
 
 runner:
