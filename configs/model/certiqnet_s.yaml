@@ -1,7 +1,7 @@
 # @package _global_
 model:
   _target_: certiqnet.models.certiqnet_s.CertiQNetS
-  R_cert: 50.0
+  R_cert: 200.0
   beta: 1.0
   tau_smooth: 10.0
   backbone:

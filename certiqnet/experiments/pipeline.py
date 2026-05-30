@@ -11,9 +11,18 @@ from omegaconf import DictConfig, OmegaConf
 
 from certiqnet.diagnostics.state_bank import generate_state_bank
 from certiqnet.experiments.baseline_runner import RolloutConfig, run_baseline_comparison
+from certiqnet.experiments.checkpoint_state import (
+    load_checkpoint_weights,
+    read_checkpoint_state,
+    read_last_run,
+    save_checkpoint_state,
+    save_last_run,
+)
 from certiqnet.experiments.factory import build_model, build_mu
+from certiqnet.experiments.logging import BufferedExperimentLogger as ExperimentLogger
 from certiqnet.experiments.metrics import aggregate_metrics, save_metrics
-from certiqnet.experiments.runner import prepare_run
+from certiqnet.experiments.paths import RunPaths, slugify
+from certiqnet.experiments.runner import experiment_name_from_cfg, prepare_run
 from certiqnet.training.datamodule import CertiQNetDataModule
 from certiqnet.training.lightning_module import CertiQNetLightningModule
 from certiqnet.utils.platform import detect_platform, resolve_trainer_config
@@ -106,6 +115,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
     actual_batch_size = int(cfg.get("_batch_size", 64))
     num_workers_raw: object = resolved_trainer.get("_num_workers")
     num_workers: int | None = num_workers_raw if isinstance(num_workers_raw, int) else None
+    max_queue = int(cfg.runner.get("max_queue", 15))
     dm = CertiQNetDataModule(
         N=int(cfg.env.N),
         mu=mu,
@@ -114,6 +124,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
         num_workers=num_workers,
         adapter=adapter,
         seed=seed,
+        max_queue=max_queue,
     )
     run_logger.info(
         "datamodule_info",
@@ -162,8 +173,65 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
     resume = cfg.project.get("resume_from_checkpoint")
     run_logger.info("starting_training", checkpoint=str(resume) if resume else None)
     trainer.fit(lightning, datamodule=dm, ckpt_path=str(resume) if resume else None)
-    torch.save(model.state_dict(), paths.artifacts / "final_model_state.pt")
+    ckpt_path = paths.artifacts / "final_model_state.pt"
+    torch.save(model.state_dict(), ckpt_path)
+    # The actual run_id and experiment_name are auto-generated inside
+    # prepare_run and baked into paths.root (…/experiment_name/run_id).
+    actual_run_id = paths.root.name
+    actual_experiment_name = experiment_name_from_cfg(cfg)
+    save_checkpoint_state(
+        paths.root,
+        ckpt_path,
+        experiment_name=actual_experiment_name,
+        run_id=actual_run_id,
+        model_target=str(cfg.model._target_),
+        seed=int(cfg.project.seed),
+        max_epochs=int(cfg.trainer.max_epochs),
+    )
+    # Persist run identity at experiment level so evaluation scripts can
+    # discover the correct output directory even when ``run_id`` is
+    # auto-generated from a timestamp.
+    save_last_run(
+        paths.root.parent,
+        run_id=actual_run_id,
+        experiment_name=actual_experiment_name,
+    )
     run_logger.info("finished_training", root=str(paths.root))
+
+
+def _discover_and_prepare(
+    cfg: DictConfig, *, cwd: Path
+) -> tuple[RunPaths, ExperimentLogger]:
+    """Prepare experiment directories, discovering the trained run if needed.
+
+    Calls ``prepare_run`` to auto-generate paths from *cfg*.  If the
+    checkpoint state does not exist at those paths (e.g. because training
+    ran in a separate call with a different auto-generated ``run_id``),
+    falls back to reading the experiment-level ``.last_run.json`` file.
+    """
+    paths, run_logger = prepare_run(cfg, cwd=cwd)
+    if read_checkpoint_state(paths.root) is not None:
+        return paths, run_logger
+
+    # ---- discovery fallback ----
+    output_root = Path(str(cfg.project.get("output_root", "outputs")))
+    if not output_root.is_absolute():
+        output_root = (cwd / output_root).resolve()
+    experiment_name = experiment_name_from_cfg(cfg)
+    experiment_root = output_root / slugify(experiment_name)
+
+    last = read_last_run(experiment_root)
+    if last is None:
+        return paths, run_logger  # will fail later with a clear error
+
+    # Re-run prepare_run with the discovered run_id so that the logger,
+    # manifest, and config all point to the correct trained-run directory.
+    if "project" not in cfg:
+        cfg.project = OmegaConf.create()
+    cfg.project.run_id = last["run_id"]
+    cfg.project.experiment_name = experiment_name
+    paths, run_logger = prepare_run(cfg, cwd=cwd)
+    return paths, run_logger
 
 
 def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
@@ -173,7 +241,7 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
     if "progress" in cfg:
         configure_progress(OmegaConf.to_container(cfg.progress, resolve=True))
 
-    paths, run_logger = prepare_run(cfg, cwd=cwd)
+    paths, run_logger = _discover_and_prepare(cfg, cwd=cwd)
     run_logger.info(
         "audit_platform_info",
         os=platform_info.os_name,
@@ -185,6 +253,7 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
     d_xi = int(getattr(adapter, "context_dim", 0))
     mu, lam = build_mu(cfg)
     model = build_model(cfg, N=int(cfg.env.N), d_xi=d_xi)
+    load_checkpoint_weights(model, paths.root)
     model.eval()
 
     run_logger.info("generating_state_bank")
@@ -238,7 +307,7 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
     if "progress" in cfg:
         configure_progress(OmegaConf.to_container(cfg.progress, resolve=True))
 
-    paths, run_logger = prepare_run(cfg, cwd=cwd)
+    paths, run_logger = _discover_and_prepare(cfg, cwd=cwd)
     run_logger.info(
         "baseline_platform_info",
         os=platform_info.os_name,
@@ -250,6 +319,7 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
     d_xi = int(getattr(adapter, "context_dim", 0))
     mu, lam = build_mu(cfg)
     model = build_model(cfg, N=int(cfg.env.N), d_xi=d_xi)
+    load_checkpoint_weights(model, paths.root)
     rollout = RolloutConfig(
         steps=int(cfg.runner.rollout_steps),
         batch_size=int(cfg.runner.rollout_batch_size),

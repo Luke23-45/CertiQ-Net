@@ -28,7 +28,7 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
         num_workers: int | None = None,
         adapter: DispatchAdapter | None = None,
         seed: int = 0,
-        max_queue: int = 100,
+        max_queue: int = 15,
     ) -> None:
         super().__init__()
         self.N = N

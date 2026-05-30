@@ -15,14 +15,15 @@ class CertiQNetLoss(nn.Module):
         super().__init__()
         self.cfg = loss_cfg
 
-    def rollout_cost(
-        self, Q: Tensor, mu: Tensor, pi: Tensor, cost: Tensor | None = None
-    ) -> Tensor:
-        """Empirical average queue length objective."""
-        del mu, pi
-        if cost is not None:
-            return cost.float().mean()
-        return Q.sum(dim=-1).mean()
+    def rollout_cost(self, Q: Tensor, mu: Tensor, pi: Tensor, diag: CertificateDiagnostics) -> Tensor:
+        """Arrival envelope ``A_pi(Q)`` as the training objective.
+
+        Unlike the static sum-of-queues cost, ``A_pi = sum_i pi_i * Q_i / mu_i^beta``
+        depends on the policy pi, giving a gradient signal that teaches the residual
+        to route toward low-weighted-queue resources.
+        """
+        del Q, mu, pi
+        return diag.A_pi.float().mean()
 
     def bc_loss(self, pi: Tensor, p_target: Tensor | None = None) -> Tensor:
         """KL imitation loss, zero when no curriculum target is provided."""
@@ -31,8 +32,8 @@ class CertiQNetLoss(nn.Module):
         return torch.nn.functional.kl_div(pi.clamp_min(1e-9).log(), p_target, reduction="batchmean")
 
     def gate_penalty(self, eta: Tensor) -> Tensor:
-        """Quadratic gate usage penalty."""
-        return eta.square().mean()
+        """Quadratic penalty pushing gate toward open (eta=1)."""
+        return (1.0 - eta).square().mean()
 
     def drift_penalty(self, diag: CertificateDiagnostics) -> Tensor:
         """Squared positive certificate violation penalty."""
@@ -53,10 +54,9 @@ class CertiQNetLoss(nn.Module):
         pi: Tensor,
         diag: CertificateDiagnostics,
         cfg: LossConfig,
-        cost: Tensor | None = None,
     ) -> dict[str, Tensor]:
         """Return all scalar loss components and total."""
-        J = self.rollout_cost(Q, mu, pi, cost)
+        J = self.rollout_cost(Q, mu, pi, diag)
         L_bc = self.bc_loss(pi)
         L_gate = self.gate_penalty(diag.eta_final)
         L_drift = self.drift_penalty(diag)

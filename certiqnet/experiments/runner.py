@@ -49,7 +49,8 @@ def prepare_run(
     if not run_id:
         run_id = make_run_id(experiment_name, int(cfg.project.seed))
     output_root_value = _optional_text(cfg.project.get("output_root", "outputs")) or "outputs"
-    root = output_root or Path(output_root_value)
+    raw_root = output_root or Path(output_root_value)
+    root = raw_root if raw_root.is_absolute() else (cwd / raw_root).resolve()
     paths = create_run_paths(root, experiment_name, run_id)
     save_resolved_config(cfg, paths)
     save_manifest(cfg, paths, experiment_name, run_id, cwd)

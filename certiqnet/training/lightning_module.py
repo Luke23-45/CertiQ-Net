@@ -29,7 +29,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         del batch_idx
         Q, mu, xi = batch["Q"], batch["mu"], batch.get("xi")
         pi, diag = self.model(Q, mu, xi, training_mode=True)
-        losses = self.loss_fn(Q, mu, pi, diag, self.cfg.loss, batch.get("cost"))
+        losses = self.loss_fn(Q, mu, pi, diag, self.cfg.loss)
         for key, value in losses.items():
             self.log(f"train/{key}", value, on_step=True, on_epoch=True, prog_bar=(key == "total"))
         self._log_diagnostics(diag, "train")
