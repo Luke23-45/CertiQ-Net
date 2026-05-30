@@ -130,9 +130,21 @@ def save_manifest(
     """Persist run manifest and return it."""
     experiment_family = str(cfg.get("experiment_family", "unknown"))
     domain = str(cfg.get("domain", "queueing"))
-    adapter = str(cfg.get("adapter", {}).get("_target_", "QueueingAdapter")).split(".")[-1] if cfg.get("adapter") else "QueueingAdapter"
-    backend = str(cfg.get("env", {}).get("_target_", "QueueingCTMC")).split(".")[-1] if cfg.get("env") else "QueueingCTMC"
-    model_category = str(cfg.get("model", {}).get("_target_", "Unknown")).split(".")[-1] if cfg.get("model") else "Unknown"
+    adapter = (
+        str(cfg.get("adapter", {}).get("_target_", "QueueingAdapter")).split(".")[-1]
+        if cfg.get("adapter")
+        else "QueueingAdapter"
+    )
+    backend = (
+        str(cfg.get("env", {}).get("_target_", "QueueingCTMC")).split(".")[-1]
+        if cfg.get("env")
+        else "QueueingCTMC"
+    )
+    model_category = (
+        str(cfg.get("model", {}).get("_target_", "Unknown")).split(".")[-1]
+        if cfg.get("model")
+        else "Unknown"
+    )
     certificate_status = str(cfg.get("certificate_status", "exact"))
     assumptions_status = bool(cfg.get("assumptions_satisfied", False))
     seed = int(cfg.get("project", {}).get("seed", 42)) if cfg.get("project") else 42

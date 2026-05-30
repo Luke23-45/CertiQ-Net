@@ -59,13 +59,16 @@ class ExperimentMetrics:
             "env_name": self.env_name,
             "seed": self.seed,
         }
+
         def _flatten(prefix: str, d: dict[str, Any]) -> None:
             for k, v in d.items():
                 if isinstance(v, dict):
                     _flatten(f"{prefix}{k}.", v)
                 elif v is not None:
                     row[f"{prefix}{k}"] = v
-                    
+                    if prefix.startswith("performance.") or prefix.startswith("certificate."):
+                        row.setdefault(k, v)
+
         _flatten("performance.", asdict(self.performance))
         _flatten("certificate.", asdict(self.certificate))
         return row

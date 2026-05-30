@@ -1,19 +1,16 @@
 """Runner for the standalone Certificate Validation program."""
 
+from __future__ import annotations
+
 import sys
 
-from studies.utils.execution import run_stage
+from studies.runner.families.certificate_validation import main as _main
 
 
 def main() -> None:
     """Run standalone certification checks (audits)."""
-    overrides: list[str] = sys.argv[1:]
-    
-    if "experiment_family=certificate_validation" not in overrides:
-        overrides.append("experiment_family=certificate_validation")
-        
-    audit_cmd = ["python", "studies/utils/audit.py"] + overrides
-    run_stage(audit_cmd, "Certificate Audit (State Bank)")
+    _main(sys.argv[1:])
+
 
 if __name__ == "__main__":
     main()

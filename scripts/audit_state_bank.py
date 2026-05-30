@@ -10,71 +10,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import hydra
-import torch
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
-from certiqnet.diagnostics.state_bank import generate_state_bank
-from certiqnet.experiments.metrics import aggregate_metrics, save_metrics
-from certiqnet.experiments.runner import prepare_run
-from certiqnet.utils.platform import detect_platform
-from certiqnet.utils.progress import configure_progress
-from scripts.train import build_model, build_mu
+from certiqnet.experiments.pipeline import run_state_bank_audit
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="config")
 def main(cfg: DictConfig) -> None:
-    platform_info = detect_platform()
-
-    if "progress" in cfg:
-        configure_progress(OmegaConf.to_container(cfg.progress, resolve=True))
-
-    paths, run_logger = prepare_run(cfg, cwd=ROOT)
-    run_logger.info("audit_platform_info",
-                    os=platform_info.os_name,
-                    torch=platform_info.torch_version,
-                    gpu=platform_info.gpu_count)
-
-    mu, lam = build_mu(cfg)
-    model = build_model(cfg, N=int(cfg.env.N))
-    model.eval()
-
-    run_logger.info("generating_state_bank")
-    Q_bank = generate_state_bank(
-        N=int(cfg.env.N),
-        mu=mu,
-        beta=float(cfg.model.beta),
-        R_cert=float(cfg.model.get("R_cert", float("inf"))),
-        n_random=512,
-        n_grid=128,
-        n_boundary=128,
-    )
-    run_logger.info("state_bank_generated", states=Q_bank.shape[0])
-
-    mu_bank = mu.unsqueeze(0).expand(Q_bank.shape[0], -1)
-    with torch.no_grad():
-        _, diag = model(Q_bank, mu_bank, training_mode=False)
-
-    violation = (diag.A_pi - diag.B_Q).clamp(min=0.0)
-    audit_metrics = aggregate_metrics(
-        model_name=str(cfg.model._target_).split(".")[-1],
-        env_name=str(cfg.env.mu_mode),
-        seed=int(cfg.project.seed),
-        lam=lam,
-        queue_trace=Q_bank,
-        cost_trace=Q_bank.sum(dim=-1),
-        dt_trace=torch.ones(Q_bank.shape[0]),
-        diagnostics=[diag],
-    )
-    save_metrics([audit_metrics], paths.audits, filename="state_bank_audit")
-    run_logger.metric(audit_metrics.flat())
-    run_logger.flush()
-
-    print(f"states={Q_bank.shape[0]}")
-    print(f"max_violation={violation.max().item():.6e}")
-    print(f"violation_rate={(violation > 0).float().mean().item():.6e}")
-    print(f"fallback_rate={diag.fallback_active.float().mean().item():.6e}")
-    print(f"gate_rate={(diag.eta_final > 0).float().mean().item():.6e}")
-    print(f"min_drift_slack={diag.drift_slack.min().item():.6e}")
+    run_state_bank_audit(cfg, cwd=ROOT)
 
 
 if __name__ == "__main__":

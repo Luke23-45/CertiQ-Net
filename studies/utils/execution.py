@@ -32,7 +32,9 @@ def run_stage(command: list[str], stage_name: str, check: bool = True) -> int:
         console.print(f"\n[bold green]>>> Stage Completed: {stage_name}[/bold green]\n")
         return result.returncode
     except subprocess.CalledProcessError as e:
-        console.print(f"\n[bold red]>>> Stage Failed: {stage_name} (exit code {e.returncode})[/bold red]")
+        console.print(
+            f"\n[bold red]>>> Stage Failed: {stage_name} (exit code {e.returncode})[/bold red]"
+        )
         if check:
             sys.exit(e.returncode)
         return e.returncode

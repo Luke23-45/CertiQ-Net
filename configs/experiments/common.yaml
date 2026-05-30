@@ -1,0 +1,20 @@
+# @package _global_
+project:
+  name: certiqnet-z2
+  seed: 42
+  output_root: outputs
+  experiment_name: null
+  run_id: null
+  resume_from_checkpoint: null
+  log_dir: ${hydra:runtime.output_dir}
+  save_checkpoints: true
+
+runner:
+  rollout_steps: 1000
+  rollout_batch_size: 32
+  max_backlog: 1000000.0
+  show_progress: true
+
+domain: queueing
+metric_schema: queueing
+

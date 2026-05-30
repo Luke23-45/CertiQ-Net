@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - /experiments/common
+  - /model: certiqnet_s
+  - /env: family_b
+  - /adapter: moe
+  - /trainer: default
+  - /logger: wandb
+  - /callbacks: default
+  - /progress: default
+  - _self_
+
+experiment_family: cross_domain
+certificate_status: approximate
