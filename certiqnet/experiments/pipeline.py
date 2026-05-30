@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import random
+import math
 from pathlib import Path
 
 import torch
@@ -32,6 +34,18 @@ try:
     import pytorch_lightning as pl
 except ModuleNotFoundError as exc:  # pragma: no cover
     raise SystemExit("pytorch-lightning is required. Run `pip install -e .`.") from exc
+
+
+def _validate_exact_certificate_constant(model: torch.nn.Module, *, context: str) -> float:
+    """Return the finite C_B required for exact queueing runs."""
+    c_b = float(getattr(model, "C_B", float("inf")))
+    if not math.isfinite(c_b) or c_b < 0:
+        raise ValueError(
+            f"Exact queueing {context} require a finite serialized model.C_B. "
+            "Update configs/model/certiqnet_s.yaml (or the equivalent model config) "
+            "to provide a finite C_B."
+        )
+    return c_b
 
 
 def run_training(cfg: DictConfig, *, cwd: Path) -> None:
@@ -110,12 +124,17 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
 
     mu, _ = build_mu(cfg)
     model = build_model(cfg, N=int(cfg.env.N), d_xi=d_xi)
+    if str(cfg.get("certificate_status", "exact")) == "exact":
+        model_c_b = _validate_exact_certificate_constant(model, context="training runs")
+        cfg.model.C_B = model_c_b
+        OmegaConf.save(config=cfg, f=paths.configs / "resolved_config.yaml", resolve=True)
     torch.save(model.state_dict(), paths.artifacts / "initial_model_state.pt")
 
     actual_batch_size = int(cfg.get("_batch_size", 64))
     num_workers_raw: object = resolved_trainer.get("_num_workers")
     num_workers: int | None = num_workers_raw if isinstance(num_workers_raw, int) else None
     max_queue = int(cfg.runner.get("max_queue", 15))
+    resample_epoch = bool(cfg.runner.get("resample_every_epoch", True))
     dm = CertiQNetDataModule(
         N=int(cfg.env.N),
         mu=mu,
@@ -125,6 +144,11 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
         adapter=adapter,
         seed=seed,
         max_queue=max_queue,
+        resample_every_epoch=resample_epoch,
+        policy_buffer_max=int(cfg.trainer.policy_buffer_max),
+        synthetic_mix_fraction=float(cfg.trainer.synthetic_mix_fraction),
+        teacher_mix_fraction=float(cfg.trainer.teacher_mix_fraction),
+        policy_mix_fraction=float(cfg.trainer.policy_mix_fraction),
     )
     run_logger.info(
         "datamodule_info",
@@ -143,7 +167,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             pl.callbacks.ModelCheckpoint(
                 dirpath=str(paths.checkpoints),
                 filename="{epoch:04d}",
-                monitor="val/CERTIFICATE_VIOLATION",
+                monitor="val/selection_score",
                 mode="min",
                 save_last=True,
                 save_top_k=3,
@@ -175,6 +199,11 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
     trainer.fit(lightning, datamodule=dm, ckpt_path=str(resume) if resume else None)
     ckpt_path = paths.artifacts / "final_model_state.pt"
     torch.save(model.state_dict(), ckpt_path)
+    manifest_path = paths.root / "manifest.json"
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["effective_certificate_constants"] = {"C_B": float(getattr(model, "C_B", float("inf")))}
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     # The actual run_id and experiment_name are auto-generated inside
     # prepare_run and baked into paths.root (…/experiment_name/run_id).
     actual_run_id = paths.root.name
@@ -253,6 +282,8 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
     d_xi = int(getattr(adapter, "context_dim", 0))
     mu, lam = build_mu(cfg)
     model = build_model(cfg, N=int(cfg.env.N), d_xi=d_xi)
+    if str(cfg.get("certificate_status", "exact")) == "exact":
+        _validate_exact_certificate_constant(model, context="audits")
     load_checkpoint_weights(model, paths.root)
     model.eval()
 
@@ -319,6 +350,8 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
     d_xi = int(getattr(adapter, "context_dim", 0))
     mu, lam = build_mu(cfg)
     model = build_model(cfg, N=int(cfg.env.N), d_xi=d_xi)
+    if str(cfg.get("certificate_status", "exact")) == "exact":
+        _validate_exact_certificate_constant(model, context="baseline comparisons")
     load_checkpoint_weights(model, paths.root)
     rollout = RolloutConfig(
         steps=int(cfg.runner.rollout_steps),

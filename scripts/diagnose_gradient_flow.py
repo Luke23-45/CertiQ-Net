@@ -103,7 +103,18 @@ def main():
     print(f"drift_slack:     {diag.drift_slack.mean().item():.4f}")
 
     print(f"\n--- Loss Components ---")
-    losses = loss_fn(Q, mu_b, pi, diag, cfg.loss)
+    expert_actions = pi.argmax(dim=-1)
+    actor_log_prob = torch.log(pi.gather(1, expert_actions.unsqueeze(-1)).clamp_min(1e-9).squeeze(-1))
+    pseudo_advantage = torch.ones(B)
+    losses = {
+        "actor": loss_fn.actor_loss(actor_log_prob, pseudo_advantage),
+        "critic": loss_fn.critic_loss(torch.zeros(B), torch.ones(B)),
+        "bc": loss_fn.bc_loss(pi),
+        "gate": loss_fn.gate_penalty(diag.eta_final),
+        "drift": loss_fn.drift_penalty(diag),
+        "residual": loss_fn.residual_size_penalty(diag),
+        "entropy": loss_fn.entropy_term(pi),
+    }
     for k, v in losses.items():
         requires_grad = v.requires_grad
         grad_fn = v.grad_fn.__class__.__name__ if v.grad_fn else "NONE"
@@ -130,41 +141,17 @@ def main():
     model.zero_grad()
 
     print(f"\n--- Rollout Cost Dependency Check ---")
-    # Construct two different policies
-    pi_backbone, _ = model.backbone(Q, mu_b)
-    pi_uniform = torch.full_like(Q, 1.0 / N)
-
-    # Compute rollout_cost on both policies
-    Q_test = torch.randint(0, 100, (B, N)).float()
-
-    # Build dummy diagnostics for each policy
-    from certiqnet.math.certificate import arrival_envelope_A
-
-    def _dummy_diag(pi, Q, mu, beta=1.0):
-        A_pi = arrival_envelope_A(pi, Q, mu, beta)
-        return type('_DummyDiag', (), {'A_pi': A_pi})()
-
-    diag_backbone = _dummy_diag(pi_backbone, Q_test, mu_b)
-    diag_uniform = _dummy_diag(pi_uniform, Q_test, mu_b)
-
-    # Loss with pi=backbone
-    loss_backbone = loss_fn.rollout_cost(Q_test, mu_b, pi_backbone, diag_backbone)
-    # Loss with pi=uniform
-    loss_uniform = loss_fn.rollout_cost(Q_test, mu_b, pi_uniform, diag_uniform)
-
-    print(f"  rollout_cost with pi=backbone: {loss_backbone.item():.4f}")
-    print(f"  rollout_cost with pi=uniform:  {loss_uniform.item():.4f}")
-    print(f"  SAME? {loss_backbone.item() == loss_uniform.item()}")
-    if loss_backbone.item() == loss_uniform.item():
-        print(f"  >>> VERIFIED: rollout_cost DOES NOT depend on pi <<<")
-    else:
-        print(f"  >>> rollout_cost depends on pi (good) <<<")
+    # Rollout-cost helper now consumes actual queue/cost traces.
+    cost_trace = torch.rand(B)
+    dt_trace = torch.ones(B)
+    print(f"  rollout_cost sample: {loss_fn.rollout_cost(cost_trace, dt_trace).item():.4f}")
 
     print(f"\n--- Diagnostic: Backbone-only forward ---")
     model.eval()
     with torch.no_grad():
         pi_base, u_base = model.backbone(Q, mu_b)
     print(f"  backbone avg_queue_length (mean sum Q): {Q.sum(dim=-1).mean().item():.4f}")
+    from certiqnet.math.certificate import arrival_envelope_A
     print(f"  backbone A_pi: {arrival_envelope_A(pi_base, Q, mu_b, 1.0).mean().item():.4f}")
 
     torch.manual_seed(0)

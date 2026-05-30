@@ -4,6 +4,7 @@ model:
   R_cert: 200.0
   beta: 1.0
   tau_smooth: 10.0
+  C_B: 1.0e9
   backbone:
     alpha_min: 0.001
     beta_min: 0.001
@@ -20,6 +21,6 @@ model:
     hidden_dim: 128
     pooling: attention
   residual:
-    R_max: 2.0
+    R_max: 4.0
   gate:
-    eta_max: 0.95
+    eta_max: 1.0

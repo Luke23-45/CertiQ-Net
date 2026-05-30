@@ -47,6 +47,7 @@ class CertiQNetSConfig:
     R_cert: float = MISSING
     beta: float = MISSING
     tau_smooth: float = 10.0
+    C_B: float = float("inf")
 
 
 @dataclass
@@ -82,6 +83,13 @@ class TrainerConfig:
     log_every_n_steps: int = 10
     lr: float = 3e-4
     weight_decay: float = 1e-5
+    rollout_horizon: int = 16
+    entropy_warmup_epochs: int = 20
+    imitation_warmup_epochs: int = 20
+    policy_buffer_max: int = 4096
+    policy_mix_fraction: float = 0.25
+    teacher_mix_fraction: float = 0.25
+    synthetic_mix_fraction: float = 0.50
 
 
 @dataclass
@@ -90,8 +98,11 @@ class LossConfig:
     omega_gate: float = 0.1
     omega_drift: float = 5.0
     omega_res: float = 0.01
-    omega_ent: float = -0.001
+    omega_ent: float = 0.0
     rollout_weight: float = 1.0
+    policy_kl_weight: float = 0.05
+    value_weight: float = 1.0
+    entropy_weight: float = 0.001
 
 
 @dataclass

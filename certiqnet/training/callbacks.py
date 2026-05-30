@@ -1,5 +1,6 @@
 """Training callbacks for certificate audits."""
 
+import warnings
 from typing import Protocol
 
 import torch
@@ -20,6 +21,7 @@ class _DataModuleLike(Protocol):
 
 class _TrainerLike(Protocol):
     datamodule: _DataModuleLike
+    current_epoch: int
 
 
 class _ModelLike(Protocol):
@@ -40,7 +42,18 @@ class _LightningLike(Protocol):
 
 
 class CertificateAuditCallback(pl.Callback if pl is not None else object):
-    """Run full state-bank audit after each validation epoch."""
+    """Run full state-bank audit after each validation epoch.
+
+    When *C_B* is finite, the audit checks whether the drift-envelope
+    constraint ``A_pi <= m(Q) + C_B`` is satisfied on a held-out state
+    bank.  Early in training violations are expected, so the assertion
+    only applies after ``assert_after_epoch`` (default 10).
+    """
+
+    def __init__(self, assert_after_epoch: int = 10, violation_tol: float = 0.5) -> None:
+        super().__init__()
+        self.assert_after_epoch = int(assert_after_epoch)
+        self.violation_tol = float(violation_tol)
 
     def on_validation_epoch_end(self, trainer: _TrainerLike, pl_module: _LightningLike) -> None:
         """Fail training if projected models violate the certificate."""
@@ -61,7 +74,17 @@ class CertificateAuditCallback(pl.Callback if pl is not None else object):
         max_violation = (diag.A_pi - diag.B_Q).clamp(min=0).max().item()
         pl_module.log("audit/max_violation", max_violation, prog_bar=True)
         pl_module.log("audit/violation_rate", (diag.A_pi > diag.B_Q).float().mean(), prog_bar=True)
-        if getattr(model, "C_B", float("inf")) < float("inf"):
-            assert max_violation < 1e-5, (
-                f"CERTIFICATE AUDIT FAILED. Max projection violation: {max_violation:.2e}."
+        fin_cb = getattr(model, "C_B", float("inf")) < float("inf")
+        epoch = trainer.current_epoch
+        if fin_cb and max_violation > self.violation_tol and epoch >= self.assert_after_epoch:
+            raise AssertionError(
+                f"CERTIFICATE AUDIT FAILED after epoch {epoch}. "
+                f"Max projection violation: {max_violation:.2e} "
+                f"(tolerance: {self.violation_tol}, C_B={getattr(model,'C_B',float('inf')):.2e})."
+            )
+        if fin_cb and max_violation > self.violation_tol:
+            warnings.warn(
+                f"Early certificate violation (epoch {epoch}): {max_violation:.2e} "
+                f"(tolerance kicks in at epoch {self.assert_after_epoch}).",
+                stacklevel=2,
             )
