@@ -26,6 +26,7 @@ class ResultColumns:
         "projection_activation_rate",
         "tail_fallback_activation_rate",
         "gate_activation_rate",
+        "gate_mean_activation",
         "residual_logit_magnitude",
         "instability_rate",
     )

@@ -68,7 +68,6 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
         cpu_logical=platform_info.cpu_count_logical,
         accelerator=resolved_trainer["accelerator"],
         precision=resolved_trainer["precision"],
-        num_workers=resolved_trainer.get("_num_workers", 0),
     )
 
     adapter = instantiate(cfg.adapter) if "adapter" in cfg else None
@@ -115,6 +114,13 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
         num_workers=num_workers,
         adapter=adapter,
         seed=seed,
+    )
+    run_logger.info(
+        "datamodule_info",
+        batch_size=dm.batch_size,
+        n_samples=dm.n_samples,
+        num_workers=dm._num_workers,
+        max_queue=dm.max_queue,
     )
 
     lightning = CertiQNetLightningModule(model, cfg)
@@ -220,7 +226,8 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
     print(f"max_violation={violation.max().item():.6e}")
     print(f"violation_rate={(violation > 0).float().mean().item():.6e}")
     print(f"fallback_rate={diag.fallback_active.float().mean().item():.6e}")
-    print(f"gate_rate={(diag.eta_final > 0).float().mean().item():.6e}")
+    print(f"gate_open_rate={(diag.eta_final > 0.1).float().mean().item():.6e}")
+    print(f"gate_mean={diag.eta_final.nanmean().item():.6e}")
     print(f"min_drift_slack={diag.drift_slack.min().item():.6e}")
 
 

@@ -55,6 +55,8 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         self.log(f"{stage}/drift_slack_mean", diag.drift_slack.mean())
         self.log(f"{stage}/eta_raw", diag.eta_raw.nanmean())
         self.log(f"{stage}/eta_final", diag.eta_final.nanmean())
+        self.log(f"{stage}/eta_final_mean", diag.eta_final.nanmean())
+        self.log(f"{stage}/eta_final_open_rate", (diag.eta_final > 0.1).float().mean())
         self.log(f"{stage}/eta_safe", diag.eta_safe.nanmean())
         self.log(f"{stage}/fallback_rate", diag.fallback_active.float().mean())
         self.log(f"{stage}/residual_norm", diag.residual_norm.mean())

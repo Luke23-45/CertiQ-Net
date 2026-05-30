@@ -38,6 +38,7 @@ class CertificateMetrics:
     projection_activation_rate: float
     tail_fallback_activation_rate: float
     gate_activation_rate: float
+    gate_mean_activation: float
     residual_logit_magnitude: float
     instability_rate: float
 
@@ -123,7 +124,8 @@ def aggregate_metrics(
         avg_drift_slack=float(slack.mean().item()),
         projection_activation_rate=float(projected.float().mean().item()),
         tail_fallback_activation_rate=float(fallback.float().mean().item()),
-        gate_activation_rate=float((eta_final > 0).float().mean().item()),
+        gate_activation_rate=float((eta_final > 0.1).float().mean().item()),
+        gate_mean_activation=float(eta_final.mean().item()),
         residual_logit_magnitude=float(residual.max().item()),
         instability_rate=float(1.0 if diverged else 0.0),
     )
