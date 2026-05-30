@@ -6,6 +6,7 @@ import json
 import random
 import math
 import shutil
+import traceback
 from pathlib import Path
 
 import torch
@@ -197,13 +198,33 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
 
     resume = cfg.project.get("resume_from_checkpoint")
     run_logger.info("starting_training", checkpoint=str(resume) if resume else None)
-    trainer.fit(lightning, datamodule=dm, ckpt_path=str(resume) if resume else None)
-
-    if logger is not False and hasattr(logger, "log_dir"):
-        lightning_metrics = Path(str(getattr(logger, "log_dir")))
-        source_metrics = lightning_metrics / "metrics.csv"
-        if source_metrics.exists():
-            shutil.copyfile(source_metrics, paths.metrics / "training_metrics.csv")
+    training_error: Exception | None = None
+    training_traceback: str | None = None
+    try:
+        trainer.fit(lightning, datamodule=dm, ckpt_path=str(resume) if resume else None)
+    except Exception as exc:  # pragma: no cover - exercised in failure runs
+        training_error = exc
+        training_traceback = traceback.format_exc()
+        raise
+    finally:
+        if logger is not False and hasattr(logger, "flush"):
+            try:
+                logger.flush()
+            except Exception:
+                pass
+        if logger is not False and hasattr(logger, "log_dir"):
+            lightning_metrics = Path(str(getattr(logger, "log_dir")))
+            source_metrics = lightning_metrics / "metrics.csv"
+            if source_metrics.exists():
+                shutil.copyfile(source_metrics, paths.metrics / "training_metrics.csv")
+        if training_error is not None:
+            failure_path = paths.metrics / "training_failure.json"
+            failure_payload = {
+                "error_type": type(training_error).__name__,
+                "message": str(training_error),
+                "traceback": training_traceback,
+            }
+            failure_path.write_text(json.dumps(failure_payload, indent=2, sort_keys=True), encoding="utf-8")
 
     ckpt_path = paths.artifacts / "final_model_state.pt"
     torch.save(model.state_dict(), ckpt_path)

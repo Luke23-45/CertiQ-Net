@@ -158,3 +158,11 @@ def save_metrics(
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
+
+    # Keep a stable compatibility alias for downstream tools that expect
+    # a canonical metrics.csv artifact in the run metrics directory.
+    if filename == "results":
+        alias_csv_path = output_dir / "metrics.csv"
+        alias_json_path = output_dir / "metrics.json"
+        alias_csv_path.write_text(csv_path.read_text(encoding="utf-8"), encoding="utf-8")
+        alias_json_path.write_text(json_path.read_text(encoding="utf-8"), encoding="utf-8")
