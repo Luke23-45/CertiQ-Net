@@ -56,11 +56,16 @@ def project_probability_vector(pi: Tensor) -> Tensor:
     This is a defensive repair step for training-time instability.  It clips
     negative and non-finite values to zero, then renormalizes rows.  Rows that
     collapse to all zeros are replaced with a uniform distribution.
+    The result is guaranteed strictly positive to prevent ``log(0)`` in
+    downstream ``Categorical.log_prob`` calls.
     """
+    eps = torch.finfo(pi.dtype).tiny
     pi = torch.nan_to_num(pi, nan=0.0, posinf=0.0, neginf=0.0).clamp_min(0.0)
     row_sum = pi.sum(dim=-1, keepdim=True)
     uniform = torch.full_like(pi, 1.0 / pi.shape[-1])
-    pi = torch.where(row_sum > 0, pi / row_sum.clamp_min(1e-12), uniform)
+    pi = torch.where(row_sum > 0, pi / row_sum.clamp_min(eps), uniform)
+    pi = pi.clamp_min(eps)
+    pi = pi / pi.sum(dim=-1, keepdim=True)
     return pi
 
 

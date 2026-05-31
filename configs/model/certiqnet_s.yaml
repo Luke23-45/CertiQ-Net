@@ -7,6 +7,7 @@ model:
   C_B: 1.0e9
   backbone:
     alpha_min: 0.001
+    alpha_max: 100.0
     beta_min: 0.001
     beta_max: 10.0
     alpha_init: 1.0

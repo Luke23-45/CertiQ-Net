@@ -27,4 +27,6 @@ class AnalyticBackbone(nn.Module):
         """Return ``(p_base, u_base)``."""
         u = self.logits(Q, mu)
         p = torch.softmax(u, dim=-1)
+        p = p.clamp_min(torch.finfo(p.dtype).tiny)
+        p = p / p.sum(dim=-1, keepdim=True)
         return p, u

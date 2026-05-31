@@ -14,6 +14,7 @@ class ConstrainedBackboneParams(nn.Module):
     def __init__(
         self,
         alpha_min: float = 1e-3,
+        alpha_max: float = 100.0,
         beta_min: float = 1e-3,
         beta_max: float = 10.0,
         gamma_max: float = 2.0,
@@ -24,9 +25,11 @@ class ConstrainedBackboneParams(nn.Module):
     ) -> None:
         super().__init__()
         assert alpha_min > 0 and beta_min > 0, "Parameter lower bounds must be positive."
+        assert alpha_max >= alpha_min, "alpha_max must be >= alpha_min."
         assert beta_max >= beta_min, "beta_max must be >= beta_min."
         assert gamma_max > 0, "gamma_max must be positive."
         self.alpha_min = alpha_min
+        self.alpha_max = alpha_max
         self.beta_min = beta_min
         self.beta_max = beta_max
         self.gamma_max = gamma_max
@@ -43,7 +46,10 @@ class ConstrainedBackboneParams(nn.Module):
 
     @property
     def alpha(self) -> Tensor:
-        return self.alpha_min + F.softplus(self.raw_alpha)
+        alpha = self.alpha_min + F.softplus(self.raw_alpha)
+        if self.alpha_max < float("inf"):
+            alpha = alpha.clamp(max=self.alpha_max)
+        return alpha
 
     @property
     def beta(self) -> Tensor:

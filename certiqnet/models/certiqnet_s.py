@@ -58,6 +58,7 @@ class CertiQNetS(nn.Module):
         self.C_B = float(cfg.C_B)
         self.backbone_params = ConstrainedBackboneParams(
             alpha_min=cfg.backbone.alpha_min,
+            alpha_max=cfg.backbone.alpha_max,
             beta_min=cfg.backbone.beta_min,
             beta_max=cfg.backbone.beta_max,
             gamma_max=cfg.backbone.gamma_max,
