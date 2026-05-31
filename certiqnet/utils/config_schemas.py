@@ -10,6 +10,7 @@ from omegaconf import MISSING
 class BackboneConfig:
     alpha_min: float = 1e-3
     beta_min: float = 1e-3
+    beta_max: float = 10.0
     alpha_init: float = 1.0
     beta_init: float = 1.0
     gamma_max: float = 2.0

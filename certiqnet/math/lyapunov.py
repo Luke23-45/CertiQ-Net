@@ -15,7 +15,8 @@ def weighted_coord(Q: Tensor, mu: Tensor, beta: float) -> Tensor:
     assert beta > 0, "Lyapunov beta must be strictly positive."
     assert (Q >= 0).all(), "Queue lengths must be non-negative."
     assert (mu > 0).all(), "Service rates must be strictly positive."
-    return Q / mu.pow(beta)
+    safe_mu_beta = mu.pow(beta).clamp(min=torch.finfo(mu.dtype).tiny)
+    return Q / safe_mu_beta
 
 
 def lyapunov_V(Q: Tensor, mu: Tensor, beta: float) -> Tensor:
