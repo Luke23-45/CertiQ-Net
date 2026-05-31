@@ -41,9 +41,7 @@ def main():
                 "tau_smooth": 10.0,
                 "backbone": {
                     "alpha_min": 1e-3,
-                    "alpha_max": 100.0,
                     "beta_min": 1e-3,
-                    "beta_max": 10.0,
                     "alpha_init": 1.0,
                     "beta_init": 1.0,
                     "gamma_max": 2.0,

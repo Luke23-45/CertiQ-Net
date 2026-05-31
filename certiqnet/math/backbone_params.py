@@ -14,9 +14,7 @@ class ConstrainedBackboneParams(nn.Module):
     def __init__(
         self,
         alpha_min: float = 1e-3,
-        alpha_max: float = 100.0,
         beta_min: float = 1e-3,
-        beta_max: float = 10.0,
         gamma_max: float = 2.0,
         alpha_init: float = 1.0,
         beta_init: float = 1.0,
@@ -25,13 +23,9 @@ class ConstrainedBackboneParams(nn.Module):
     ) -> None:
         super().__init__()
         assert alpha_min > 0 and beta_min > 0, "Parameter lower bounds must be positive."
-        assert alpha_max >= alpha_min, "alpha_max must be >= alpha_min."
-        assert beta_max >= beta_min, "beta_max must be >= beta_min."
         assert gamma_max > 0, "gamma_max must be positive."
         self.alpha_min = alpha_min
-        self.alpha_max = alpha_max
         self.beta_min = beta_min
-        self.beta_max = beta_max
         self.gamma_max = gamma_max
         self.raw_alpha = nn.Parameter(torch.tensor(self._inv_softplus(alpha_init - alpha_min)))
         self.raw_beta = nn.Parameter(torch.tensor(self._inv_softplus(beta_init - beta_min)))
@@ -46,17 +40,11 @@ class ConstrainedBackboneParams(nn.Module):
 
     @property
     def alpha(self) -> Tensor:
-        alpha = self.alpha_min + F.softplus(self.raw_alpha)
-        if self.alpha_max < float("inf"):
-            alpha = alpha.clamp(max=self.alpha_max)
-        return alpha
+        return self.alpha_min + F.softplus(self.raw_alpha)
 
     @property
     def beta(self) -> Tensor:
-        beta = self.beta_min + F.softplus(self.raw_beta)
-        if self.beta_max < float("inf"):
-            beta = beta.clamp(max=self.beta_max)
-        return beta
+        return self.beta_min + F.softplus(self.raw_beta)
 
     @property
     def gamma(self) -> Tensor:
