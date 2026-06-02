@@ -15,8 +15,9 @@ def _expand_mu(Q: Tensor, mu: Tensor) -> Tensor:
     return mu
 
 
-def _baseline_device(module: nn.Module) -> torch.device:
-    return next(module.parameters(), torch.zeros((), device=torch.device("cpu"))).device
+def _baseline_device(module: nn.Module, reference: Tensor) -> torch.device:
+    param = next(module.parameters(), None)
+    return reference.device if param is None else param.device
 
 
 def _diag(
@@ -75,7 +76,7 @@ class AnalyticBackbonePolicy(nn.Module):
         self, Q: Tensor, mu: Tensor, xi: Tensor | None = None, training_mode: bool = False
     ) -> tuple[Tensor, DispatcherDiagnostics]:
         del xi, training_mode
-        device = _baseline_device(self)
+        device = _baseline_device(self, Q)
         Q = Q.to(device=device)
         mu = mu.to(device=device, dtype=Q.dtype)
         mu_b = _expand_mu(Q, mu)
@@ -97,7 +98,7 @@ class RandomPolicy(nn.Module):
         self, Q: Tensor, mu: Tensor, xi: Tensor | None = None, training_mode: bool = False
     ) -> tuple[Tensor, DispatcherDiagnostics]:
         del xi, training_mode
-        device = _baseline_device(self)
+        device = _baseline_device(self, Q)
         Q = Q.to(device=device)
         mu = mu.to(device=device, dtype=Q.dtype)
         mu_b = _expand_mu(Q, mu)
@@ -119,7 +120,7 @@ class JoinShortestWeightedQueue(nn.Module):
         self, Q: Tensor, mu: Tensor, xi: Tensor | None = None, training_mode: bool = False
     ) -> tuple[Tensor, DispatcherDiagnostics]:
         del xi, training_mode
-        device = _baseline_device(self)
+        device = _baseline_device(self, Q)
         Q = Q.to(device=device)
         mu = mu.to(device=device, dtype=Q.dtype)
         mu_b = _expand_mu(Q, mu)

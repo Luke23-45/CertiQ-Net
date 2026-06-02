@@ -25,6 +25,7 @@ class CertiQNetLoss(nn.Module):
         """KL imitation loss, zero when no curriculum target is provided."""
         if p_target is None:
             return torch.zeros((), device=pi.device, dtype=pi.dtype)
+        p_target = p_target.to(device=pi.device, dtype=pi.dtype)
         return torch.nn.functional.kl_div(pi.clamp_min(1e-9).log(), p_target, reduction="batchmean")
 
     def usage_penalty(self, usage: Tensor) -> Tensor:
