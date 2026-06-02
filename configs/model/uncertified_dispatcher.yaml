@@ -1,0 +1,26 @@
+# @package _global_
+model:
+  _target_: certiqnet.dispatcher.model.CertiQDispatcher
+  geometry:
+    alpha_min: 0.001
+    beta_min: 0.001
+    alpha_init: 1.0
+    beta_init: 1.0
+    gamma_max: 2.0
+    gamma_init: 0.0
+    c_init: 0.0
+    C: 5.0
+  proposal:
+    d_local: 64
+    d_global: 64
+    hidden_dim: 128
+    local_layers: 2
+    update_layers: 2
+    pooling: attention
+    correction_bound: 2.0
+    usage_max: 1.0
+  certificate:
+    mode: uncertified
+    fallback_radius: 200.0
+    projection_tolerance: 1.0e-5
+

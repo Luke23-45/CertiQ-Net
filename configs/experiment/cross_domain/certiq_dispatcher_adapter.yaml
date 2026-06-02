@@ -1,8 +1,9 @@
 defaults:
-  - /model: certiqnet_x_ablation
-  - /env: family_a
-  - /adapter: queueing
+  - /model: certiq_dispatcher
+  - /env: family_b
+  - /adapter: moe
   - /trainer: default
   - /logger: wandb
   - /callbacks: default
   - /progress: default
+

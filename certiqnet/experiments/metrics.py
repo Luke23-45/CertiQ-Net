@@ -11,7 +11,7 @@ from typing import Any
 import torch
 from torch import Tensor
 
-from certiqnet.math.certificate import CertificateDiagnostics
+from certiqnet.dispatcher.types import DispatcherDiagnostics
 
 
 @dataclass(frozen=True)
@@ -32,14 +32,14 @@ class PerformanceMetrics:
 class CertificateMetrics:
     """Mandatory certificate/safety metrics."""
 
-    drift_violation_rate: float
-    min_drift_slack: float
-    avg_drift_slack: float
+    certificate_violation_rate: float
+    min_certificate_slack: float
+    avg_certificate_slack: float
     projection_activation_rate: float
     tail_fallback_activation_rate: float
-    gate_activation_rate: float
-    gate_mean_activation: float
-    residual_logit_magnitude: float
+    usage_activation_rate: float
+    usage_mean_activation: float
+    correction_magnitude: float
     instability_rate: float
 
 
@@ -84,7 +84,7 @@ def aggregate_metrics(
     queue_trace: Tensor,
     cost_trace: Tensor,
     dt_trace: Tensor,
-    diagnostics: list[CertificateDiagnostics],
+    diagnostics: list[DispatcherDiagnostics],
     diverged: bool = False,
     drop_count: int = 0,
     arrivals: int = 0,
@@ -95,13 +95,13 @@ def aggregate_metrics(
     backlog = queue_trace.sum(dim=-1)
     weighted_backlog = (backlog * weights).sum() / total_time
     weighted_cost = (cost_trace * weights).sum() / total_time
-    slack = torch.cat([d.drift_slack.detach().flatten().cpu() for d in diagnostics])
-    eta_final = torch.cat([d.eta_final.detach().flatten().cpu() for d in diagnostics])
-    eta_safe_values = [d.eta_safe.detach().flatten().cpu() for d in diagnostics]
-    eta_safe = torch.cat(eta_safe_values)
+    slack = torch.cat([d.certificate_slack.detach().flatten().cpu() for d in diagnostics])
+    usage_final = torch.cat([d.usage_final.detach().flatten().cpu() for d in diagnostics])
+    usage_cap_values = [d.usage_cap.detach().flatten().cpu() for d in diagnostics]
+    usage_cap = torch.cat(usage_cap_values)
     fallback = torch.cat([d.fallback_active.detach().flatten().cpu() for d in diagnostics])
-    residual = torch.cat([d.residual_norm.detach().flatten().cpu() for d in diagnostics])
-    projected = torch.isfinite(eta_safe) & (eta_final.cpu() < eta_safe - 1e-7)
+    correction = torch.cat([d.correction_magnitude.detach().flatten().cpu() for d in diagnostics])
+    projected = torch.isfinite(usage_cap) & (usage_final.cpu() < usage_cap - 1e-7)
     generic = GenericDispatchMetrics(
         avg_cost=float(weighted_cost.item()),
         drop_rate=float(drop_count / max(arrivals, 1)),
@@ -119,14 +119,14 @@ def aggregate_metrics(
         queueing=queueing,
     )
     certificate = CertificateMetrics(
-        drift_violation_rate=float((slack < -1e-5).float().mean().item()),
-        min_drift_slack=float(slack.min().item()),
-        avg_drift_slack=float(slack.mean().item()),
+        certificate_violation_rate=float((slack < -1e-5).float().mean().item()),
+        min_certificate_slack=float(slack.min().item()),
+        avg_certificate_slack=float(slack.mean().item()),
         projection_activation_rate=float(projected.float().mean().item()),
         tail_fallback_activation_rate=float(fallback.float().mean().item()),
-        gate_activation_rate=float((eta_final > 0.1).float().mean().item()),
-        gate_mean_activation=float(eta_final.mean().item()),
-        residual_logit_magnitude=float(residual.max().item()),
+        usage_activation_rate=float((usage_final > 0.1).float().mean().item()),
+        usage_mean_activation=float(usage_final.mean().item()),
+        correction_magnitude=float(correction.max().item()),
         instability_rate=float(1.0 if diverged else 0.0),
     )
     return ExperimentMetrics(

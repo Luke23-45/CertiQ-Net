@@ -8,17 +8,13 @@ from typing import Any, TypeVar
 import torch
 from omegaconf import DictConfig, OmegaConf
 
+from certiqnet.dispatcher.config import CertiQDispatcherConfig
+from certiqnet.dispatcher.model import CertiQDispatcher
 from certiqnet.models.baselines import (
     AnalyticBackbonePolicy,
-    CertiQNetSAblation_LearnedPhiOnly,
-    CertiQNetSAblation_NoGate,
-    CertiQNetXAblation,
     JoinShortestWeightedQueue,
     RandomPolicy,
 )
-from certiqnet.models.certiqnet_p import CertiQNetP
-from certiqnet.models.certiqnet_s import CertiQNetS
-from certiqnet.utils.config_schemas import CertiQNetPConfig, CertiQNetSConfig
 
 T = TypeVar("T")
 
@@ -64,22 +60,20 @@ def build_model(cfg: DictConfig, N: int, d_xi: int = 0) -> torch.nn.Module:
         raise TypeError("cfg.model must resolve to a mapping")
 
     target = str(model_data.get("_target_", ""))
-    if target.endswith("CertiQNetP"):
-        return CertiQNetP(_dataclass_from_dict(CertiQNetPConfig, model_data), N=N, d_xi=d_xi)
+    if target.endswith("CertiQDispatcher"):
+        return CertiQDispatcher(
+            _dataclass_from_dict(CertiQDispatcherConfig, model_data), N=N, d_xi=d_xi
+        )
     if target.endswith("AnalyticBackbonePolicy"):
-        return AnalyticBackbonePolicy(N=N, beta=float(model_data.get("beta", 1.0)))
+        return AnalyticBackbonePolicy(
+            N=N, beta=float(model_data.get("beta", 1.0)), C=float(model_data.get("C", float("inf")))
+        )
     if target.endswith("RandomPolicy"):
-        return RandomPolicy(N=N, beta=float(model_data.get("beta", 1.0)))
+        return RandomPolicy(
+            N=N, beta=float(model_data.get("beta", 1.0)), C=float(model_data.get("C", float("inf")))
+        )
     if target.endswith("JoinShortestWeightedQueue"):
-        return JoinShortestWeightedQueue(N=N, beta=float(model_data.get("beta", 1.0)))
-    if target.endswith("CertiQNetSAblation_NoGate"):
-        return CertiQNetSAblation_NoGate(
-            _dataclass_from_dict(CertiQNetSConfig, model_data), N=N, d_xi=d_xi
+        return JoinShortestWeightedQueue(
+            N=N, beta=float(model_data.get("beta", 1.0)), C=float(model_data.get("C", float("inf")))
         )
-    if target.endswith("CertiQNetXAblation"):
-        return CertiQNetXAblation(
-            _dataclass_from_dict(CertiQNetSConfig, model_data), N=N, d_xi=d_xi
-        )
-    if target.endswith("CertiQNetSAblation_LearnedPhiOnly"):
-        return CertiQNetSAblation_LearnedPhiOnly(N=N, beta=float(model_data.get("beta", 1.0)))
-    return CertiQNetS(_dataclass_from_dict(CertiQNetSConfig, model_data), N=N, d_xi=d_xi)
+    raise ValueError(f"Unsupported model target: {target}")

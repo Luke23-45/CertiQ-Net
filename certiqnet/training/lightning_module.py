@@ -13,7 +13,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     pl = None
 
-from certiqnet.math.certificate import CertificateDiagnostics
+from certiqnet.dispatcher.types import DispatcherDiagnostics
 from certiqnet.simulation.ctmc import CTMCEnvironment
 from certiqnet.training.loss import CertiQNetLoss
 
@@ -23,9 +23,9 @@ def validation_selection_score(violation: Tensor, avg_cost: Tensor, p95_backlog:
     return violation * 1e9 + avg_cost * 1e3 + p95_backlog
 
 
-def _stack_mean(diags: list[CertificateDiagnostics]) -> CertificateDiagnostics:
+def _stack_mean(diags: list[DispatcherDiagnostics]) -> DispatcherDiagnostics:
     """Aggregate a rollout of diagnostics into one mean diagnostic record."""
-    fields = CertificateDiagnostics.__dataclass_fields__.keys()
+    fields = DispatcherDiagnostics.__dataclass_fields__.keys()
     values: dict[str, Tensor] = {}
     for name in fields:
         tensors = [getattr(diag, name) for diag in diags]
@@ -35,7 +35,7 @@ def _stack_mean(diags: list[CertificateDiagnostics]) -> CertificateDiagnostics:
             values[name] = tensors[-1]
         else:
             values[name] = torch.stack(tensors, dim=0).mean(dim=0)
-    return CertificateDiagnostics(**values)
+    return DispatcherDiagnostics(**values)
 
 
 class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.nn.Module):
@@ -90,7 +90,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         expert_action = self._collect_expert_actions(Q0, mu0)
         expert_pi = F.one_hot(expert_action, num_classes=int(Q0.shape[-1])).float()
 
-        init_out = self.model.forward_with_aux(Q0, mu0, xi0, training_mode=True)
+        init_out = self.model.forward_full(Q0, mu0, xi0, certify=True)
         imitation_weight = self._imitation_weight()
         entropy_weight = self._entropy_weight()
 
@@ -98,7 +98,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         env.reset(Q0.detach().clone())
 
         visited_states: list[Tensor] = []
-        policy_diagnostics: list[CertificateDiagnostics] = []
+        policy_diagnostics: list[DispatcherDiagnostics] = []
         log_probs: list[Tensor] = []
         values: list[Tensor] = []
         rewards: list[Tensor] = []
@@ -112,7 +112,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             xi_obs = xi0
             if dm is not None and hasattr(dm, "adapter"):
                 Q_obs, mu_obs, xi_obs = dm.adapter.make_observation(env.Q, mu0)
-            out = self.model.forward_with_aux(Q_obs, mu_obs, xi_obs, training_mode=True)
+            out = self.model.forward_full(Q_obs, mu_obs, xi_obs, certify=True)
             dist = Categorical(probs=out.pi)
             action_idx = dist.sample()
             action_pi = F.one_hot(action_idx, num_classes=int(Q0.shape[-1])).float()
@@ -125,7 +125,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             values.append(out.value)
             rewards.append(reward)
             entropies.append(dist.entropy())
-            ref_policies.append(out.p_base)
+            ref_policies.append(out.p_cert)
             pi_rollouts.append(out.pi)
 
         rewards_t = torch.stack(rewards, dim=0)
@@ -144,18 +144,18 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
 
         rollout_diag = _stack_mean(policy_diagnostics)
-        rollout_diag = CertificateDiagnostics(
-            A_base=rollout_diag.A_base,
-            A_nn=rollout_diag.A_nn,
-            A_pi=rollout_diag.A_pi,
+        rollout_diag = DispatcherDiagnostics(
+            A_cert=rollout_diag.A_cert,
+            A_proposal=rollout_diag.A_proposal,
+            A_final=rollout_diag.A_final,
             m_Q=rollout_diag.m_Q,
             B_Q=rollout_diag.B_Q,
-            drift_slack=rollout_diag.drift_slack,
-            eta_raw=rollout_diag.eta_raw,
-            eta_final=rollout_diag.eta_final,
-            eta_safe=rollout_diag.eta_safe,
+            certificate_slack=rollout_diag.certificate_slack,
+            usage_raw=rollout_diag.usage_raw,
+            usage_final=rollout_diag.usage_final,
+            usage_cap=rollout_diag.usage_cap,
             fallback_active=rollout_diag.fallback_active,
-            residual_norm=rollout_diag.residual_norm,
+            correction_magnitude=rollout_diag.correction_magnitude,
             policy_entropy=rollout_diag.policy_entropy,
             selected_resource=rollout_diag.selected_resource,
         )
@@ -163,9 +163,9 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         actor_loss = self.loss_fn.actor_loss(log_probs_t.reshape(-1), advantages.reshape(-1))
         critic_loss = self.loss_fn.critic_loss(values_t.reshape(-1), returns.reshape(-1))
         bc_loss = self.loss_fn.bc_loss(init_out.pi, expert_pi)
-        gate_loss = self.loss_fn.gate_penalty(rollout_diag.eta_final)
-        drift_loss = self.loss_fn.drift_penalty(rollout_diag)
-        residual_loss = self.loss_fn.residual_size_penalty(rollout_diag)
+        usage_loss = self.loss_fn.usage_penalty(rollout_diag.usage_final)
+        certificate_loss = self.loss_fn.certificate_penalty(rollout_diag)
+        correction_loss = self.loss_fn.correction_size_penalty(rollout_diag)
         kl_loss = self.loss_fn.policy_kl(
             pi_rollouts_t.reshape(-1, pi_rollouts_t.shape[-1]),
             ref_policies_t.reshape(-1, ref_policies_t.shape[-1]),
@@ -175,9 +175,9 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             "actor": actor_loss,
             "critic": critic_loss,
             "bc": bc_loss,
-            "gate": gate_loss,
-            "drift": drift_loss,
-            "residual": residual_loss,
+            "usage": usage_loss,
+            "certificate": certificate_loss,
+            "correction": correction_loss,
             "kl": kl_loss,
             "entropy": entropy_loss,
         }
@@ -185,9 +185,9 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             self.loss_fn.cfg.rollout_weight * actor_loss
             + self.loss_fn.cfg.value_weight * critic_loss
             + self.loss_fn.cfg.omega_bc * bc_loss
-            + self.loss_fn.cfg.omega_gate * gate_loss
-            + self.loss_fn.cfg.omega_drift * drift_loss
-            + self.loss_fn.cfg.omega_res * residual_loss
+            + self.loss_fn.cfg.omega_usage * usage_loss
+            + self.loss_fn.cfg.omega_certificate * certificate_loss
+            + self.loss_fn.cfg.omega_correction * correction_loss
             + self.loss_fn.cfg.policy_kl_weight * kl_loss
             - entropy_weight * entropy_loss
         )
@@ -211,7 +211,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         env = CTMCEnvironment(N=int(Q.shape[-1]), lam=float(self.cfg.env.lam), mu=mu[0], B=Q.shape[0])
         env.reset(Q.detach().clone())
         dm = getattr(self.trainer, "datamodule", None)
-        policy_diagnostics: list[CertificateDiagnostics] = []
+        policy_diagnostics: list[DispatcherDiagnostics] = []
         queue_trace: list[Tensor] = []
         cost_trace: list[Tensor] = []
         dt_trace: list[Tensor] = []
@@ -223,7 +223,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
                 xi_obs = xi
                 if dm is not None and hasattr(dm, "adapter"):
                     Q_obs, mu_obs, xi_obs = dm.adapter.make_observation(env.Q, mu)
-                out = self.model.forward_with_aux(Q_obs, mu_obs, xi_obs, training_mode=False)
+                out = self.model.forward_full(Q_obs, mu_obs, xi_obs, certify=True)
                 action_idx = out.pi.argmax(dim=-1)
                 action_pi = F.one_hot(action_idx, num_classes=int(Q.shape[-1])).float()
                 step = env.step(action_pi)
@@ -237,7 +237,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         dt_t = torch.cat(dt_trace, dim=0).float()
         avg_cost = self.loss_fn.rollout_cost(cost_t, dt_t)
         p95_backlog = backlog.quantile(0.95)
-        violation = (diag.drift_slack.min() < -1e-4).float()
+        violation = (diag.certificate_slack.min() < -1e-4).float()
         selection_score = validation_selection_score(violation, avg_cost, p95_backlog)
         self.log("val/CERTIFICATE_VIOLATION", violation, prog_bar=True)
         self.log("val/avg_cost", avg_cost, prog_bar=True)
@@ -245,22 +245,21 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         self.log("val/selection_score", selection_score, prog_bar=False)
         self._log_diagnostics(diag, "val")
 
-    def _log_diagnostics(self, diag: CertificateDiagnostics, stage: str) -> None:
+    def _log_diagnostics(self, diag: DispatcherDiagnostics, stage: str) -> None:
         """Log all diagnostic fields in aggregate form."""
-        self.log(f"{stage}/A_base", diag.A_base.mean())
-        self.log(f"{stage}/A_nn", diag.A_nn.mean())
-        self.log(f"{stage}/A_pi", diag.A_pi.mean())
+        self.log(f"{stage}/A_cert", diag.A_cert.mean())
+        self.log(f"{stage}/A_proposal", diag.A_proposal.mean())
+        self.log(f"{stage}/A_final", diag.A_final.mean())
         self.log(f"{stage}/m_Q", diag.m_Q.mean())
         self.log(f"{stage}/B_Q", diag.B_Q.mean())
-        self.log(f"{stage}/drift_slack_min", diag.drift_slack.min())
-        self.log(f"{stage}/drift_slack_mean", diag.drift_slack.mean())
-        self.log(f"{stage}/eta_raw", diag.eta_raw.nanmean())
-        self.log(f"{stage}/eta_final", diag.eta_final.nanmean())
-        self.log(f"{stage}/eta_final_mean", diag.eta_final.nanmean())
-        self.log(f"{stage}/eta_final_open_rate", (diag.eta_final > 0.1).float().mean())
-        self.log(f"{stage}/eta_safe", diag.eta_safe.nanmean())
+        self.log(f"{stage}/certificate_slack_min", diag.certificate_slack.min())
+        self.log(f"{stage}/certificate_slack_mean", diag.certificate_slack.mean())
+        self.log(f"{stage}/usage_raw", diag.usage_raw.nanmean())
+        self.log(f"{stage}/usage_final", diag.usage_final.nanmean())
+        self.log(f"{stage}/usage_open_rate", (diag.usage_final > 0.1).float().mean())
+        self.log(f"{stage}/usage_cap", diag.usage_cap.nanmean())
         self.log(f"{stage}/fallback_rate", diag.fallback_active.float().mean())
-        self.log(f"{stage}/residual_norm", diag.residual_norm.mean())
+        self.log(f"{stage}/correction_magnitude", diag.correction_magnitude.mean())
         self.log(f"{stage}/policy_entropy", diag.policy_entropy.mean())
 
     def configure_optimizers(self) -> dict[str, object]:

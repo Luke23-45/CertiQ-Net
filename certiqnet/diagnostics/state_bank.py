@@ -5,7 +5,7 @@ from typing import Protocol
 import torch
 from torch import Tensor
 
-from certiqnet.math.certificate import CertificateDiagnostics
+from certiqnet.dispatcher.types import DispatcherDiagnostics
 from certiqnet.math.lyapunov import tail_size
 
 
@@ -14,7 +14,7 @@ class AuditableModel(Protocol):
 
     def __call__(
         self, Q: Tensor, mu: Tensor, xi: Tensor | None = None, training_mode: bool = False
-    ) -> tuple[Tensor, CertificateDiagnostics]: ...
+    ) -> tuple[Tensor, DispatcherDiagnostics]: ...
 
 
 def _expand_mu(mu: Tensor, rows: int) -> Tensor:
@@ -74,7 +74,7 @@ def generate_adversarial_states(
         opt.zero_grad()
         Q_pos = Q.clamp(min=0)
         _, diag = model(Q_pos, mu_b, training_mode=True)
-        loss = -diag.drift_slack.mean()
+        loss = -diag.certificate_slack.mean()
         loss.backward()
         opt.step()
     return Q.detach().clamp(min=0).ceil()

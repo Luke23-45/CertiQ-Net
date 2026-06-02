@@ -46,4 +46,8 @@ Thumbs.db
 outputs/
 multirun/
 tests
-docs
+!tests/dispatcher/
+!tests/dispatcher/**
+docs/*
+!docs/z3/
+!docs/z3/**

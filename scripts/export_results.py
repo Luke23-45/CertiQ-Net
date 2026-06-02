@@ -20,14 +20,14 @@ class ResultColumns:
         "drop_rate",
     )
     certificate: tuple[str, ...] = (
-        "drift_violation_rate",
-        "min_drift_slack",
-        "avg_drift_slack",
+        "certificate_violation_rate",
+        "min_certificate_slack",
+        "avg_certificate_slack",
         "projection_activation_rate",
         "tail_fallback_activation_rate",
-        "gate_activation_rate",
-        "gate_mean_activation",
-        "residual_logit_magnitude",
+        "usage_activation_rate",
+        "usage_mean_activation",
+        "correction_magnitude",
         "instability_rate",
     )
 

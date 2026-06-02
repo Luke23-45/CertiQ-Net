@@ -1,8 +1,9 @@
 defaults:
-  - /model: certiqnet_s
+  - /model: certiq_dispatcher
   - /env: family_a
   - /adapter: queueing
   - /trainer: default
   - /logger: wandb
   - /callbacks: default
   - /progress: default
+

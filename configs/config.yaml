@@ -1,5 +1,5 @@
 defaults:
-  - model: certiqnet_s
+  - model: certiq_dispatcher
   - env: family_a
   - adapter: queueing
   - trainer: default
@@ -9,7 +9,7 @@ defaults:
   - _self_
 
 project:
-  name: certiqnet-z2
+  name: certiq-dispatcher-z3
   seed: 42
   output_root: outputs
   experiment_name: null
@@ -26,13 +26,13 @@ runner:
 
 sweep:
   seeds: [2] # [0, 1, 2]
-  models: [certiqnet_s, certiqnet_p, backbone_only, certiqnet_x_ablation]
+  models: [certiq_dispatcher, backbone_only, uncertified_dispatcher]
   envs: [family_a, family_b, family_c, family_e]
 
 loss:
   omega_bc: 1.0
-  omega_gate: 0.1
-  omega_drift: 5.0
-  omega_res: 0.01
+  omega_usage: 0.1
+  omega_certificate: 5.0
+  omega_correction: 0.01
   omega_ent: -0.001
   rollout_weight: 1.0

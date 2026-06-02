@@ -39,15 +39,14 @@ except ModuleNotFoundError as exc:  # pragma: no cover
 
 
 def _validate_exact_certificate_constant(model: torch.nn.Module, *, context: str) -> float:
-    """Return the finite C_B required for exact queueing runs."""
-    c_b = float(getattr(model, "C_B", float("inf")))
-    if not math.isfinite(c_b) or c_b < 0:
+    """Return the finite certificate constant required for exact queueing runs."""
+    constant = float(getattr(model, "C", float("inf")))
+    if not math.isfinite(constant) or constant < 0:
         raise ValueError(
-            f"Exact queueing {context} require a finite serialized model.C_B. "
-            "Update configs/model/certiqnet_s.yaml (or the equivalent model config) "
-            "to provide a finite C_B."
+            f"Exact queueing {context} require a finite model.C. "
+            "Update the CertiQ Dispatcher model config to provide a finite geometry.C."
         )
-    return c_b
+    return constant
 
 
 def run_training(cfg: DictConfig, *, cwd: Path) -> None:
@@ -127,8 +126,8 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
     mu, _ = build_mu(cfg)
     model = build_model(cfg, N=int(cfg.env.N), d_xi=d_xi)
     if str(cfg.get("certificate_status", "exact")) == "exact":
-        model_c_b = _validate_exact_certificate_constant(model, context="training runs")
-        cfg.model.C_B = model_c_b
+        model_constant = _validate_exact_certificate_constant(model, context="training runs")
+        cfg.model.geometry.C = model_constant
         OmegaConf.save(config=cfg, f=paths.configs / "resolved_config.yaml", resolve=True)
     torch.save(model.state_dict(), paths.artifacts / "initial_model_state.pt")
 
@@ -231,7 +230,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
     manifest_path = paths.root / "manifest.json"
     if manifest_path.exists():
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest["effective_certificate_constants"] = {"C_B": float(getattr(model, "C_B", float("inf")))}
+        manifest["effective_certificate_constants"] = {"C": float(getattr(model, "C", float("inf")))}
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
     # The actual run_id and experiment_name are auto-generated inside
     # prepare_run and baked into paths.root (…/experiment_name/run_id).
@@ -320,8 +319,8 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
     Q_bank = generate_state_bank(
         N=int(cfg.env.N),
         mu=mu,
-        beta=float(cfg.model.beta),
-        R_cert=float(cfg.model.get("R_cert", float("inf"))),
+        beta=float(getattr(model, "beta", 1.0)),
+        R_cert=float(cfg.model.certificate.get("fallback_radius", float("inf"))),
         n_random=512,
         n_grid=128,
         n_boundary=128,
@@ -334,9 +333,9 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
     else:
         xi_bank = None
     with torch.no_grad():
-        _, diag = model(Q_bank, mu_bank, xi_bank, training_mode=False)
+        _, diag = model(Q_bank, mu_bank, xi_bank, certify=True)
 
-    violation = (diag.A_pi - diag.B_Q).clamp(min=0.0)
+    violation = (diag.A_final - diag.B_Q).clamp(min=0.0)
     audit_metrics = aggregate_metrics(
         model_name=str(cfg.model._target_).split(".")[-1],
         env_name=str(cfg.env.mu_mode),
@@ -355,9 +354,9 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
     print(f"max_violation={violation.max().item():.6e}")
     print(f"violation_rate={(violation > 0).float().mean().item():.6e}")
     print(f"fallback_rate={diag.fallback_active.float().mean().item():.6e}")
-    print(f"gate_open_rate={(diag.eta_final > 0.1).float().mean().item():.6e}")
-    print(f"gate_mean={diag.eta_final.nanmean().item():.6e}")
-    print(f"min_drift_slack={diag.drift_slack.min().item():.6e}")
+    print(f"usage_open_rate={(diag.usage_final > 0.1).float().mean().item():.6e}")
+    print(f"usage_mean={diag.usage_final.nanmean().item():.6e}")
+    print(f"min_certificate_slack={diag.certificate_slack.min().item():.6e}")
 
 
 def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:

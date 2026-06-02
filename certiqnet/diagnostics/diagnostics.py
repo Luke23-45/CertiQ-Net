@@ -1,5 +1,5 @@
-"""Certificate diagnostic dataclass re-export."""
+"""Dispatcher diagnostic dataclass re-export."""
 
-from certiqnet.math.certificate import CertificateDiagnostics
+from certiqnet.dispatcher.types import DispatcherDiagnostics
 
-__all__ = ["CertificateDiagnostics"]
+__all__ = ["DispatcherDiagnostics"]

@@ -1,8 +1,9 @@
 defaults:
-  - /model: certiqnet_p
-  - /env: family_e
+  - /model: uncertified_dispatcher
+  - /env: family_a
   - /adapter: queueing
   - /trainer: default
   - /logger: wandb
-  - /callbacks: certificate_audit
+  - /callbacks: default
   - /progress: default
+

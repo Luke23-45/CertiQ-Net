@@ -4,12 +4,12 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from certiqnet.math.certificate import CertificateDiagnostics
+from certiqnet.dispatcher.types import DispatcherDiagnostics
 from certiqnet.utils.config_schemas import LossConfig
 
 
 class CertiQNetLoss(nn.Module):
-    """Total loss with individually logged components."""
+    """Total loss with individually logged z3 dispatcher components."""
 
     def __init__(self, loss_cfg: LossConfig) -> None:
         super().__init__()
@@ -27,17 +27,17 @@ class CertiQNetLoss(nn.Module):
             return torch.zeros((), device=pi.device, dtype=pi.dtype)
         return torch.nn.functional.kl_div(pi.clamp_min(1e-9).log(), p_target, reduction="batchmean")
 
-    def gate_penalty(self, eta: Tensor) -> Tensor:
-        """Quadratic penalty pushing gate toward open (eta=1)."""
-        return (1.0 - eta).square().mean()
+    def usage_penalty(self, usage: Tensor) -> Tensor:
+        """Quadratic penalty encouraging useful proposal usage."""
+        return (1.0 - usage).square().mean()
 
-    def drift_penalty(self, diag: CertificateDiagnostics) -> Tensor:
+    def certificate_penalty(self, diag: DispatcherDiagnostics) -> Tensor:
         """Squared positive certificate violation penalty."""
-        return (diag.A_pi - diag.B_Q).clamp(min=0.0).square().mean()
+        return (diag.A_final - diag.B_Q).clamp(min=0.0).square().mean()
 
-    def residual_size_penalty(self, diag: CertificateDiagnostics) -> Tensor:
-        """Residual-size proxy from logged residual infinity norm."""
-        return diag.residual_norm.square().mean()
+    def correction_size_penalty(self, diag: DispatcherDiagnostics) -> Tensor:
+        """Proposal correction size penalty."""
+        return diag.correction_magnitude.square().mean()
 
     def entropy_term(self, pi: Tensor) -> Tensor:
         """Categorical entropy term."""
@@ -58,7 +58,7 @@ class CertiQNetLoss(nn.Module):
     def forward(
         self,
         pi: Tensor,
-        diag: CertificateDiagnostics,
+        diag: DispatcherDiagnostics,
         cfg: LossConfig,
         *,
         imitation_target: Tensor | None = None,
@@ -72,9 +72,9 @@ class CertiQNetLoss(nn.Module):
         """Return all scalar loss components and total."""
         del cfg
         L_bc = self.bc_loss(pi, imitation_target)
-        L_gate = self.gate_penalty(diag.eta_final)
-        L_drift = self.drift_penalty(diag)
-        L_res = self.residual_size_penalty(diag)
+        L_usage = self.usage_penalty(diag.usage_final)
+        L_certificate = self.certificate_penalty(diag)
+        L_correction = self.correction_size_penalty(diag)
         L_ent = self.entropy_term(pi)
         L_kl = torch.zeros((), device=pi.device, dtype=pi.dtype)
         if ref_pi is not None:
@@ -89,9 +89,9 @@ class CertiQNetLoss(nn.Module):
         total = (
             self.cfg.rollout_weight * L_actor
             + self.cfg.omega_bc * L_bc
-            + self.cfg.omega_gate * L_gate
-            + self.cfg.omega_drift * L_drift
-            + self.cfg.omega_res * L_res
+            + self.cfg.omega_usage * L_usage
+            + self.cfg.omega_certificate * L_certificate
+            + self.cfg.omega_correction * L_correction
             - ent_w * L_ent
             + self.cfg.policy_kl_weight * L_kl
             + self.cfg.value_weight * L_critic
@@ -101,9 +101,9 @@ class CertiQNetLoss(nn.Module):
             "actor": L_actor,
             "critic": L_critic,
             "bc": L_bc,
-            "gate": L_gate,
-            "drift": L_drift,
-            "residual": L_res,
+            "usage": L_usage,
+            "certificate": L_certificate,
+            "correction": L_correction,
             "kl": L_kl,
             "entropy": L_ent,
         }

@@ -1,5 +1,5 @@
 defaults:
-  - /model: certiqnet_s
+  - /model: certiq_dispatcher
   - /env: family_a
   - /adapter: queueing
   - /trainer: default
@@ -17,11 +17,13 @@ trainer:
   rollout_horizon: 4
 
 model:
-  R_cert: 200.0
-  beta: 1.0
-  tau_smooth: 10.0
-  C_B: 1.0e9
+  geometry:
+    C: 5.0
+  certificate:
+    mode: projection
+    fallback_radius: 200.0
 
 runner:
   rollout_steps: 4
   rollout_batch_size: 4
+
