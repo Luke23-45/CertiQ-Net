@@ -26,7 +26,7 @@ runner:
 
 sweep:
   seeds: [2] # [0, 1, 2]
-  models: [certiq_dispatcher, backbone_only, uncertified_dispatcher]
+  models: [certiq_dispatcher]
   envs: [family_a, family_b, family_c, family_e]
 
 loss:

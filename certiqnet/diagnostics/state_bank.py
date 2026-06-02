@@ -73,7 +73,9 @@ def generate_adversarial_states(
     for _ in range(n_steps):
         opt.zero_grad()
         Q_pos = Q.clamp(min=0)
-        _, diag = model(Q_pos, mu_b, training_mode=True)
+        if hasattr(model, "reset_dispatch_state"):
+            model.reset_dispatch_state()
+        _, diag = model(Q_pos, mu_b, training_mode=False)
         loss = -diag.certificate_slack.mean()
         loss.backward()
         opt.step()

@@ -25,6 +25,9 @@ class DispatcherDiagnostics:
     correction_magnitude: Tensor
     policy_entropy: Tensor
     selected_resource: Tensor
+    pressure_mean: Tensor
+    pressure_max: Tensor
+    pressure_update_norm: Tensor
 
 
 @dataclass(frozen=True)
@@ -39,4 +42,3 @@ class DispatcherForward:
     usage_raw: Tensor
     usage_final: Tensor
     proposal_logits: Tensor
-

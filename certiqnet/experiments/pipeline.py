@@ -333,7 +333,9 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
     else:
         xi_bank = None
     with torch.no_grad():
-        _, diag = model(Q_bank, mu_bank, xi_bank, certify=True)
+        if hasattr(model, "reset_dispatch_state"):
+            model.reset_dispatch_state()
+        _, diag = model(Q_bank, mu_bank, xi_bank, certify=True, training_mode=False)
 
     violation = (diag.A_final - diag.B_Q).clamp(min=0.0)
     audit_metrics = aggregate_metrics(

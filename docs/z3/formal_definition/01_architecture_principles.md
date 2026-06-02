@@ -114,10 +114,9 @@ An elegant CertiQ Dispatcher architecture should have:
 1. one canonical forward equation,
 2. one resource-set interface,
 3. one diagnostics object,
-4. pluggable proposal encoders,
-5. pluggable certificate operators,
+4. one proposal operator,
+5. one certificate boundary,
 6. theorem claims stated only at the certificate boundary.
 
-The implementation may expose multiple model presets, but those presets must
-be parameterizations of the same architecture.
-
+The implementation may expose certificate modes, but they must all be
+parameterizations of the same reflected-pressure architecture.

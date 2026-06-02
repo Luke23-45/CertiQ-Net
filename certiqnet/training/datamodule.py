@@ -202,23 +202,25 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
 
     def train_dataloader(self) -> DataLoader:
         assert self.train_ds is not None
+        pin_memory = self._num_workers > 0 and torch.cuda.is_available()
         return DataLoader(
             self.train_ds,
             batch_size=self.batch_size,
             shuffle=True,
             collate_fn=self._collate,
             num_workers=self._num_workers,
-            pin_memory=self._num_workers > 0,
+            pin_memory=pin_memory,
             persistent_workers=self._num_workers > 0,
         )
 
     def val_dataloader(self) -> DataLoader:
         assert self.val_ds is not None
+        pin_memory = self._num_workers > 0 and torch.cuda.is_available()
         return DataLoader(
             self.val_ds,
             batch_size=self.batch_size,
             collate_fn=self._collate,
             num_workers=self._num_workers,
-            pin_memory=self._num_workers > 0,
+            pin_memory=pin_memory,
             persistent_workers=self._num_workers > 0,
         )

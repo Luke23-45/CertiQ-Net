@@ -42,7 +42,7 @@ class SetProposal(nn.Module):
         self.pooling = pooling
         self.correction_bound = float(correction_bound)
         self.usage_max = float(usage_max)
-        self.local = mlp(4 + d_xi, hidden_dim, d_local, local_layers)
+        self.local = mlp(5 + d_xi, hidden_dim, d_local, local_layers)
         self.attn = nn.Linear(d_local, 1, bias=False) if pooling == "attention" else None
         self.global_out = nn.Linear(d_local, d_global)
         self.update = mlp(d_local + d_global, hidden_dim, d_local, update_layers)
@@ -50,7 +50,9 @@ class SetProposal(nn.Module):
         self.usage = nn.Linear(d_global, 1)
         self.value = nn.Linear(d_global, 1)
 
-    def _features(self, Q: Tensor, mu: Tensor, y: Tensor, xi: Tensor | None) -> Tensor:
+    def _features(
+        self, Q: Tensor, mu: Tensor, y: Tensor, pressure: Tensor, xi: Tensor | None
+    ) -> Tensor:
         batch, n = Q.shape
         lam_total = mu.sum(dim=-1, keepdim=True).clamp_min(torch.finfo(mu.dtype).tiny)
         features = [
@@ -58,6 +60,7 @@ class SetProposal(nn.Module):
             torch.log(mu.clamp_min(torch.finfo(mu.dtype).tiny)).unsqueeze(-1),
             y.unsqueeze(-1),
             (mu / lam_total).unsqueeze(-1),
+            torch.log1p(pressure.clamp_min(0.0)).unsqueeze(-1),
         ]
         if xi is None:
             if self.d_xi > 0:
@@ -68,10 +71,19 @@ class SetProposal(nn.Module):
         return torch.cat(features, dim=-1)
 
     def forward(
-        self, Q: Tensor, mu: Tensor, y: Tensor, u_cert: Tensor, xi: Tensor | None = None
+        self,
+        Q: Tensor,
+        mu: Tensor,
+        y: Tensor,
+        u_cert: Tensor,
+        pressure: Tensor | None = None,
+        xi: Tensor | None = None,
+        pressure_scale: float = 0.0,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
         """Return ``(p_proposal, correction, usage_raw, value)``."""
-        z0 = self.local(self._features(Q, mu, y, xi))
+        if pressure is None:
+            pressure = torch.zeros_like(Q)
+        z0 = self.local(self._features(Q, mu, y, pressure, xi))
         if self.pooling == "attention":
             assert self.attn is not None
             weights = torch.softmax(self.attn(z0).squeeze(-1), dim=-1)
@@ -81,11 +93,10 @@ class SetProposal(nn.Module):
         g = self.global_out(pooled)
         z1 = self.update(torch.cat([z0, g.unsqueeze(1).expand(-1, Q.shape[1], -1)], dim=-1))
         correction = self.correction_bound * torch.tanh(self.correction(z1).squeeze(-1))
-        logits = u_cert + correction
+        logits = u_cert + correction - float(pressure_scale) * pressure
         p = torch.softmax(logits, dim=-1)
         p = p.clamp_min(torch.finfo(p.dtype).tiny)
         p = p / p.sum(dim=-1, keepdim=True)
         usage_raw = self.usage_max * torch.sigmoid(self.usage(g).squeeze(-1))
         value = self.value(g).squeeze(-1)
         return p, correction, usage_raw, value
-

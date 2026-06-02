@@ -10,6 +10,8 @@ def run_rollout(model: torch.nn.Module, env: CTMCEnvironment, steps: int) -> dic
     """Run a model-controlled CTMC rollout for a fixed number of events."""
     costs: list[Tensor] = []
     dts: list[Tensor] = []
+    if hasattr(model, "reset_dispatch_state"):
+        model.reset_dispatch_state()
     for _ in range(steps):
         mu = env.mu.unsqueeze(0).expand(env.B, -1)
         with torch.no_grad():
@@ -26,6 +28,8 @@ def collect_transitions(
     """Collect rollout states and actions for training buffers."""
     states: list[Tensor] = []
     probs: list[Tensor] = []
+    if hasattr(model, "reset_dispatch_state"):
+        model.reset_dispatch_state()
     for _ in range(steps):
         mu = env.mu.unsqueeze(0).expand(env.B, -1)
         with torch.no_grad():

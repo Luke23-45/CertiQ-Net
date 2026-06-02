@@ -7,6 +7,7 @@ from certiqnet.dispatcher.config import (
     CertiQDispatcherConfig,
     CertificateConfig,
     GeometryConfig,
+    PressureConfig,
     ProposalConfig,
 )
 from omegaconf import MISSING
@@ -15,6 +16,7 @@ __all__ = [
     "CertiQDispatcherConfig",
     "CertificateConfig",
     "GeometryConfig",
+    "PressureConfig",
     "ProposalConfig",
     "EnvConfig",
     "TrainerConfig",
@@ -88,7 +90,7 @@ class ProgressConfig:
 @dataclass
 class SweepConfig:
     seeds: tuple[int, ...] = (0, 1, 2)
-    models: tuple[str, ...] = ("certiq_dispatcher", "backbone_only", "uncertified_dispatcher")
+    models: tuple[str, ...] = ("certiq_dispatcher",)
     envs: tuple[str, ...] = ("family_a", "family_b", "family_c", "family_e")
 
 

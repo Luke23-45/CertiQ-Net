@@ -52,6 +52,8 @@ def evaluate_policy(
 ) -> ExperimentMetrics:
     """Run one CTMC rollout and return dual metrics."""
     torch.manual_seed(seed)
+    if hasattr(model, "reset_dispatch_state"):
+        model.reset_dispatch_state()
     adapter = adapter if adapter is not None else QueueingAdapter(assumptions_satisfied=True)
     env = CTMCEnvironment(N=N, lam=lam, mu=mu, B=rollout.batch_size)
     queue_trace: list[torch.Tensor] = []

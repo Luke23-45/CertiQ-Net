@@ -115,6 +115,19 @@ p^\Theta_{\mathrm{prop}}
 The proposal is anchored to the certified base logits. It is not a free
 black-box dispatcher.
 
+The proposal also receives a reflected pressure state \(p\), and the proposal
+logits are adjusted by a monotone pressure penalty:
+
+\[
+\operatorname{logits}(Q,\mu,\xi,p)
+=
+u^{\mathrm{cert}} + r^\Theta - \rho p.
+\]
+
+The pressure state is updated between rollout steps and between independent
+rollouts when the model is explicitly reset. It does not replace the
+certificate operator.
+
 ## 5. Raw Preference For Learning
 
 The proposal layer may also produce a raw usage preference:
@@ -126,9 +139,9 @@ The proposal layer may also produce a raw usage preference:
 \(\eta_{\mathrm{raw}}\) is not a certificate. It is only the learned desire to
 use the proposal.
 
-## 6. Candidate Mixture
+## 6. Proposal Mixture
 
-The candidate mixture is:
+The proposal mixture before certification is:
 
 \[
 \pi_\eta
@@ -139,7 +152,7 @@ The candidate mixture is:
 \]
 
 The certificate operator chooses or modifies \(\eta\), or more generally
-projects the candidate policy, so the final dispatch distribution is
+projects the proposal mixture, so the final dispatch distribution is
 admissible.
 
 ## 7. Certificate Operator
@@ -161,15 +174,15 @@ It returns:
 The final policy must be the distribution used by the simulator, trainer,
 evaluator, and deployment path.
 
-## 8. Architecture Presets
+## 8. Certificate Modes
 
-z3 may expose presets:
+The canonical architecture has one reflected-pressure dispatcher and one
+certificate interface. The certificate layer may evaluate different admissible
+actions:
 
-1. **CertiQ Dispatcher-F**: tail fallback certificate operator,
-2. **CertiQ Dispatcher-P**: drift-envelope projection operator,
-3. **CertiQ Dispatcher-X**: uncertified ablation.
+1. projection,
+2. fallback,
+3. uncertified ablation for comparison only.
 
-These are presets of one architecture, not separate architectures.
-
-The certified presets must share the same forward interface and diagnostics
-contract.
+These are certificate modes, not separate architectures. The dispatcher
+forward interface and diagnostics contract remain the same.

@@ -58,6 +58,11 @@ implementation is wrong or the numerical tolerance is incorrectly declared.
 The learned proposal should be trained as a correction over the certified base,
 not as an independent dispatcher.
 
+The current implementation uses a reflected pressure state during training and
+evaluation. The pressure state is a nonnegative controller memory that shifts
+proposal logits away from repeatedly preferred resources, while the
+certificate operator still decides admissibility.
+
 Acceptable proposal targets include:
 
 1. rollout-improved certified policy,
@@ -102,7 +107,8 @@ Ablations should test the architecture thesis:
 5. equivariant proposal versus order-dependent proposal,
 6. context-free versus context-aware proposal.
 
-The uncertified ablation must be labeled as uncertified.
+The uncertified ablation, when used for comparison, must be labeled as
+uncertified.
 
 ## 7. Curriculum
 
@@ -114,4 +120,3 @@ Recommended curriculum:
 4. optimize rollout cost,
 5. audit state banks before reporting results,
 6. only then expand to approximate adapters or richer domains.
-

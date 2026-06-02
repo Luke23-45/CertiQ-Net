@@ -50,6 +50,9 @@ def _diag(
         correction_magnitude=torch.zeros_like(nan),
         policy_entropy=policy_entropy(pi),
         selected_resource=pi.argmax(dim=-1),
+        pressure_mean=torch.zeros_like(nan),
+        pressure_max=torch.zeros_like(nan),
+        pressure_update_norm=torch.zeros_like(nan),
     )
 
 

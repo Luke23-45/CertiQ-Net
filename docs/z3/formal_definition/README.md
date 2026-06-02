@@ -15,6 +15,7 @@ heterogeneous capacity-constrained resources.
 4. [04_certificate_layer.md](./04_certificate_layer.md)
 5. [05_training_and_objectives.md](./05_training_and_objectives.md)
 6. [06_research_references.md](./06_research_references.md)
+7. [07_reflected_pressure_research.md](./07_reflected_pressure_research.md)
 
 ## z3 Thesis
 
@@ -37,7 +38,7 @@ Here:
 3. \(\mathcal C_Q\) is the state-dependent certificate operator,
 4. \(\pi^\Theta\) is the final dispatch distribution.
 
-The architecture is not defined by preview implementation variants. It is the
+The architecture is not defined by preview implementation history. It is the
 composition of base geometry, learned proposal, and certificate operator.
 
 ## Relationship To z2

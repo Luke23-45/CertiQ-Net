@@ -75,22 +75,26 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         return base * (0.5 + 0.5 * frac)
 
     def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor:
-        from certiqnet.models.baselines import JoinShortestWeightedQueue
-
-        expert = JoinShortestWeightedQueue(N=int(Q.shape[-1]), beta=float(self.model.beta))
-        with torch.no_grad():
-            pi, _ = expert(Q, mu, training_mode=False)
-        return pi.argmax(dim=-1)
+        """Return the analytic JSWQ expert action without instantiating a module."""
+        beta = float(self.model.beta)
+        if mu.dim() == 1:
+            mu = mu.unsqueeze(0).expand(Q.shape[0], -1)
+        weighted = Q / mu.pow(beta).clamp_min(torch.finfo(Q.dtype).tiny)
+        return weighted.argmin(dim=-1)
 
     def training_step(self, batch: dict[str, Tensor], batch_idx: int) -> Tensor:
         """Run an on-policy rollout plus warm-start imitation and certificate regularization."""
         del batch_idx
         Q0, mu0, xi0 = batch["Q"], batch["mu"], batch.get("xi")
         dm = getattr(self.trainer, "datamodule", None)
+        if hasattr(self.model, "reset_dispatch_state"):
+            self.model.reset_dispatch_state()
         expert_action = self._collect_expert_actions(Q0, mu0)
-        expert_pi = F.one_hot(expert_action, num_classes=int(Q0.shape[-1])).float()
-
-        init_out = self.model.forward_full(Q0, mu0, xi0, certify=True)
+        init_out = self.model.forward_full(Q0, mu0, xi0, certify=True, training_mode=True)
+        expert_pi = F.one_hot(expert_action, num_classes=int(Q0.shape[-1])).to(
+            device=init_out.pi.device,
+            dtype=init_out.pi.dtype,
+        )
         imitation_weight = self._imitation_weight()
         entropy_weight = self._entropy_weight()
 
@@ -112,7 +116,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             xi_obs = xi0
             if dm is not None and hasattr(dm, "adapter"):
                 Q_obs, mu_obs, xi_obs = dm.adapter.make_observation(env.Q, mu0)
-            out = self.model.forward_full(Q_obs, mu_obs, xi_obs, certify=True)
+            out = self.model.forward_full(Q_obs, mu_obs, xi_obs, certify=True, training_mode=True)
             dist = Categorical(probs=out.pi)
             action_idx = dist.sample()
             action_pi = F.one_hot(action_idx, num_classes=int(Q0.shape[-1])).float()
@@ -158,6 +162,9 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             correction_magnitude=rollout_diag.correction_magnitude,
             policy_entropy=rollout_diag.policy_entropy,
             selected_resource=rollout_diag.selected_resource,
+            pressure_mean=rollout_diag.pressure_mean,
+            pressure_max=rollout_diag.pressure_max,
+            pressure_update_norm=rollout_diag.pressure_update_norm,
         )
 
         actor_loss = self.loss_fn.actor_loss(log_probs_t.reshape(-1), advantages.reshape(-1))
@@ -208,6 +215,8 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         """Run exact-gate validation and expose queueing metrics for checkpointing."""
         del batch_idx
         Q, mu, xi = batch["Q"], batch["mu"], batch.get("xi")
+        if hasattr(self.model, "reset_dispatch_state"):
+            self.model.reset_dispatch_state()
         env = CTMCEnvironment(N=int(Q.shape[-1]), lam=float(self.cfg.env.lam), mu=mu[0], B=Q.shape[0])
         env.reset(Q.detach().clone())
         dm = getattr(self.trainer, "datamodule", None)
@@ -223,7 +232,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
                 xi_obs = xi
                 if dm is not None and hasattr(dm, "adapter"):
                     Q_obs, mu_obs, xi_obs = dm.adapter.make_observation(env.Q, mu)
-                out = self.model.forward_full(Q_obs, mu_obs, xi_obs, certify=True)
+                out = self.model.forward_full(Q_obs, mu_obs, xi_obs, certify=True, training_mode=False)
                 action_idx = out.pi.argmax(dim=-1)
                 action_pi = F.one_hot(action_idx, num_classes=int(Q.shape[-1])).float()
                 step = env.step(action_pi)
@@ -261,6 +270,9 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         self.log(f"{stage}/fallback_rate", diag.fallback_active.float().mean())
         self.log(f"{stage}/correction_magnitude", diag.correction_magnitude.mean())
         self.log(f"{stage}/policy_entropy", diag.policy_entropy.mean())
+        self.log(f"{stage}/pressure_mean", diag.pressure_mean.mean())
+        self.log(f"{stage}/pressure_max", diag.pressure_max.mean())
+        self.log(f"{stage}/pressure_update_norm", diag.pressure_update_norm.mean())
 
     def configure_optimizers(self) -> dict[str, object]:
         """Configure AdamW with cosine annealing."""

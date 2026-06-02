@@ -41,6 +41,9 @@ class CertificateMetrics:
     usage_mean_activation: float
     correction_magnitude: float
     instability_rate: float
+    pressure_mean: float
+    pressure_max: float
+    pressure_update_norm: float
 
 
 @dataclass(frozen=True)
@@ -101,6 +104,11 @@ def aggregate_metrics(
     usage_cap = torch.cat(usage_cap_values)
     fallback = torch.cat([d.fallback_active.detach().flatten().cpu() for d in diagnostics])
     correction = torch.cat([d.correction_magnitude.detach().flatten().cpu() for d in diagnostics])
+    pressure_mean = torch.cat([d.pressure_mean.detach().flatten().cpu() for d in diagnostics])
+    pressure_max = torch.cat([d.pressure_max.detach().flatten().cpu() for d in diagnostics])
+    pressure_update_norm = torch.cat(
+        [d.pressure_update_norm.detach().flatten().cpu() for d in diagnostics]
+    )
     projected = torch.isfinite(usage_cap) & (usage_final.cpu() < usage_cap - 1e-7)
     generic = GenericDispatchMetrics(
         avg_cost=float(weighted_cost.item()),
@@ -128,6 +136,9 @@ def aggregate_metrics(
         usage_mean_activation=float(usage_final.mean().item()),
         correction_magnitude=float(correction.max().item()),
         instability_rate=float(1.0 if diverged else 0.0),
+        pressure_mean=float(pressure_mean.mean().item()),
+        pressure_max=float(pressure_max.max().item()),
+        pressure_update_norm=float(pressure_update_norm.mean().item()),
     )
     return ExperimentMetrics(
         model_name=model_name,

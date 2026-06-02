@@ -69,6 +69,8 @@ class CertificateAuditCallback(pl.Callback if pl is not None else object):
             n_boundary=64,
         )
         model.eval()
+        if hasattr(model, "reset_dispatch_state"):
+            model.reset_dispatch_state()
         with torch.no_grad():
             _, diag = model(Q_bank, mu.unsqueeze(0).expand(len(Q_bank), -1), training_mode=False)
         max_violation = (diag.A_final - diag.B_Q).clamp(min=0).max().item()

@@ -37,9 +37,16 @@ class CertificateConfig:
 
 
 @dataclass
+class PressureConfig:
+    rho: float = 0.75
+    step_size: float = 0.15
+    decay: float = 0.05
+
+
+@dataclass
 class CertiQDispatcherConfig:
     _target_: str = "certiqnet.dispatcher.model.CertiQDispatcher"
     geometry: GeometryConfig = field(default_factory=GeometryConfig)
     proposal: ProposalConfig = field(default_factory=ProposalConfig)
     certificate: CertificateConfig = field(default_factory=CertificateConfig)
-
+    pressure: PressureConfig = field(default_factory=PressureConfig)

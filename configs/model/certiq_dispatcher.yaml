@@ -23,4 +23,7 @@ model:
     mode: projection
     fallback_radius: 200.0
     projection_tolerance: 1.0e-5
-
+  pressure:
+    rho: 0.75
+    step_size: 0.15
+    decay: 0.05
