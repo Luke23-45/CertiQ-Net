@@ -59,17 +59,28 @@ class CertifiedGeometry(nn.Module):
     def c(self) -> Tensor:
         return F.softplus(self.raw_c)
 
+    def _scalar_params(self, reference: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+        """Return scalar parameters on the same device/dtype as ``reference``."""
+        alpha = self.alpha.to(device=reference.device, dtype=reference.dtype)
+        beta = self.beta.to(device=reference.device, dtype=reference.dtype)
+        gamma = self.gamma.to(device=reference.device, dtype=reference.dtype)
+        c = self.c.to(device=reference.device, dtype=reference.dtype)
+        c_constant = torch.as_tensor(self.C, device=reference.device, dtype=reference.dtype)
+        return alpha, beta, gamma, c, c_constant
+
     def weighted_workload(self, Q: Tensor, mu: Tensor) -> Tensor:
         """Return ``Q_i / mu_i^beta``."""
         assert Q.shape == mu.shape, "Q and mu must have identical shape."
         assert (Q >= 0).all(), "Queue lengths must be non-negative."
         assert (mu > 0).all(), "Service rates must be positive."
-        return Q / mu.pow(self.beta).clamp_min(torch.finfo(mu.dtype).tiny)
+        _, beta, _, _, _ = self._scalar_params(Q)
+        return Q / mu.pow(beta).clamp_min(torch.finfo(mu.dtype).tiny)
 
     def logits(self, Q: Tensor, mu: Tensor) -> Tensor:
         """Return certified base logits."""
-        y_shift = (Q + self.c) / mu.pow(self.beta).clamp_min(torch.finfo(mu.dtype).tiny)
-        return self.gamma * torch.log(mu.clamp_min(torch.finfo(mu.dtype).tiny)) - self.alpha * y_shift
+        alpha, beta, gamma, c, _ = self._scalar_params(Q)
+        y_shift = (Q + c) / mu.pow(beta).clamp_min(torch.finfo(mu.dtype).tiny)
+        return gamma * torch.log(mu.clamp_min(torch.finfo(mu.dtype).tiny)) - alpha * y_shift
 
     def policy(self, Q: Tensor, mu: Tensor) -> tuple[Tensor, Tensor]:
         """Return ``(p_cert, u_cert)``."""
@@ -82,5 +93,5 @@ class CertifiedGeometry(nn.Module):
         """Return ``(m(Q), B(Q))``."""
         y = self.weighted_workload(Q, mu)
         m_q = y.min(dim=-1).values
-        return m_q, m_q + self.C
-
+        _, _, _, _, c_constant = self._scalar_params(Q)
+        return m_q, m_q + c_constant
