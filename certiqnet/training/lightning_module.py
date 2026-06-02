@@ -77,7 +77,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
     def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor:
         from certiqnet.models.baselines import JoinShortestWeightedQueue
 
-        expert = JoinShortestWeightedQueue(N=int(Q.shape[-1]), beta=float(self.cfg.model.beta))
+        expert = JoinShortestWeightedQueue(N=int(Q.shape[-1]), beta=float(self.model.beta))
         with torch.no_grad():
             pi, _ = expert(Q, mu, training_mode=False)
         return pi.argmax(dim=-1)
@@ -120,7 +120,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             reward = -(step["cost"].float() * step["dt"].float())
 
             visited_states.append(Q_obs.detach().cpu())
-            policy_diagnostics.append(out.diag)
+            policy_diagnostics.append(out.diagnostics)
             log_probs.append(dist.log_prob(action_idx))
             values.append(out.value)
             rewards.append(reward)
@@ -227,7 +227,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
                 action_idx = out.pi.argmax(dim=-1)
                 action_pi = F.one_hot(action_idx, num_classes=int(Q.shape[-1])).float()
                 step = env.step(action_pi)
-                policy_diagnostics.append(out.diag)
+                policy_diagnostics.append(out.diagnostics)
                 queue_trace.append(step["Q"].detach())
                 cost_trace.append(step["cost"].detach())
                 dt_trace.append(step["dt"].detach())
