@@ -15,6 +15,10 @@ def _expand_mu(Q: Tensor, mu: Tensor) -> Tensor:
     return mu
 
 
+def _baseline_device(module: nn.Module) -> torch.device:
+    return next(module.parameters(), torch.zeros((), device=torch.device("cpu"))).device
+
+
 def _diag(
     pi: Tensor,
     p_cert: Tensor,
@@ -71,6 +75,9 @@ class AnalyticBackbonePolicy(nn.Module):
         self, Q: Tensor, mu: Tensor, xi: Tensor | None = None, training_mode: bool = False
     ) -> tuple[Tensor, DispatcherDiagnostics]:
         del xi, training_mode
+        device = _baseline_device(self)
+        Q = Q.to(device=device)
+        mu = mu.to(device=device, dtype=Q.dtype)
         mu_b = _expand_mu(Q, mu)
         pi, _ = self.geometry.policy(Q, mu_b)
         pi = normalize_policy(pi)
@@ -90,6 +97,9 @@ class RandomPolicy(nn.Module):
         self, Q: Tensor, mu: Tensor, xi: Tensor | None = None, training_mode: bool = False
     ) -> tuple[Tensor, DispatcherDiagnostics]:
         del xi, training_mode
+        device = _baseline_device(self)
+        Q = Q.to(device=device)
+        mu = mu.to(device=device, dtype=Q.dtype)
         mu_b = _expand_mu(Q, mu)
         pi = torch.full_like(Q, 1.0 / self.N)
         pi = normalize_policy(pi)
@@ -109,6 +119,9 @@ class JoinShortestWeightedQueue(nn.Module):
         self, Q: Tensor, mu: Tensor, xi: Tensor | None = None, training_mode: bool = False
     ) -> tuple[Tensor, DispatcherDiagnostics]:
         del xi, training_mode
+        device = _baseline_device(self)
+        Q = Q.to(device=device)
+        mu = mu.to(device=device, dtype=Q.dtype)
         mu_b = _expand_mu(Q, mu)
         idx = (Q / mu_b.pow(self.beta)).argmin(dim=-1)
         pi = torch.zeros_like(Q)

@@ -23,6 +23,11 @@ def expand_mu(Q: Tensor, mu: Tensor) -> Tensor:
     return mu
 
 
+def _module_device(module: nn.Module) -> torch.device:
+    """Return the primary device for a module."""
+    return next(module.parameters()).device
+
+
 class CertiQDispatcher(nn.Module):
     """Certified online assignment architecture from the z3 formal definition."""
 
@@ -68,6 +73,10 @@ class CertiQDispatcher(nn.Module):
         certify: bool = True,
     ) -> DispatcherForward:
         """Return full policy, proposal, value, and diagnostics."""
+        device = _module_device(self)
+        Q = Q.to(device=device)
+        mu = mu.to(device=device, dtype=Q.dtype)
+        xi = xi.to(device=device, dtype=Q.dtype) if xi is not None else None
         assert Q.dim() == 2, "Q must have shape (B, N)."
         assert Q.shape[-1] == self.N, "Q last dimension must match model N."
         mu_b = expand_mu(Q, mu)
@@ -137,4 +146,3 @@ class CertiQDispatcher(nn.Module):
         del training_mode
         out = self.forward_full(Q, mu, xi, certify=certify)
         return out.pi, out.diagnostics
-
