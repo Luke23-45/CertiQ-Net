@@ -68,7 +68,9 @@ def generate_adversarial_states(
 ) -> Tensor:
     """Use gradient ascent on certificate violation to produce hard audit states."""
     mu_b = _expand_mu(mu, n_states)
-    Q = torch.randint(0, 50, (n_states, N)).float().requires_grad_(True)
+    device = next((p.device for p in model.parameters() if p is not None), torch.device("cpu"))
+    Q = torch.randint(0, 50, (n_states, N), device=device).float().requires_grad_(True)
+    mu_b = mu_b.to(device=device)
     opt = torch.optim.Adam([Q], lr=0.5)
     for _ in range(n_steps):
         opt.zero_grad()
@@ -79,4 +81,4 @@ def generate_adversarial_states(
         loss = -diag.certificate_slack.mean()
         loss.backward()
         opt.step()
-    return Q.detach().clamp(min=0).ceil()
+    return Q.detach().clamp(min=0).ceil().to(device="cpu")

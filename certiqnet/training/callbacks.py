@@ -34,6 +34,17 @@ class _ModelLike(Protocol):
         self, Q: Tensor, mu: Tensor, xi: Tensor | None = None, training_mode: bool = False
     ) -> tuple[Tensor, DispatcherDiagnostics]: ...
 
+    def parameters(self): ...
+
+
+def _model_device(model: _ModelLike) -> torch.device:
+    """Return the device that the model parameters live on."""
+    try:
+        param = next(model.parameters())
+    except (StopIteration, TypeError):
+        return torch.device("cpu")
+    return param.device
+
 
 class _LightningLike(Protocol):
     model: _ModelLike
@@ -71,8 +82,15 @@ class CertificateAuditCallback(pl.Callback if pl is not None else object):
         model.eval()
         if hasattr(model, "reset_dispatch_state"):
             model.reset_dispatch_state()
+        device = _model_device(model)
+        Q_bank = Q_bank.to(device=device)
+        mu_dev = mu.to(device=device)
         with torch.no_grad():
-            _, diag = model(Q_bank, mu.unsqueeze(0).expand(len(Q_bank), -1), training_mode=False)
+            _, diag = model(
+                Q_bank,
+                mu_dev.unsqueeze(0).expand(len(Q_bank), -1),
+                training_mode=False,
+            )
         max_violation = (diag.A_final - diag.B_Q).clamp(min=0).max().item()
         pl_module.log("audit/max_violation", max_violation, prog_bar=True)
         pl_module.log("audit/violation_rate", (diag.A_final > diag.B_Q).float().mean(), prog_bar=True)
