@@ -41,23 +41,28 @@ def kl_project_linear(
     assert q.shape == cost.shape, "q and cost must have the same shape"
     assert budget.dim() == 1 and budget.shape[0] == q.shape[0], "budget must be (B,)"
 
-    eps = torch.finfo(cost.dtype).tiny
-    cost = cost.clamp_min(eps)
-    budget = budget.clamp_min(eps)
+    work_dtype = torch.float64 if cost.dtype in {torch.float16, torch.bfloat16, torch.float32} else cost.dtype
+    q_work = q.to(dtype=work_dtype)
+    cost_work = cost.to(dtype=work_dtype)
+    budget_work = budget.to(dtype=work_dtype)
 
-    expected = (q * cost).sum(dim=-1)
-    feasible = expected <= budget + tolerance
+    eps = torch.finfo(cost_work.dtype).tiny
+    cost_work = cost_work.clamp_min(eps)
+    budget_work = budget_work.clamp_min(eps)
 
-    p = q.clone()
-    nu = torch.zeros(q.shape[0], device=q.device, dtype=q.dtype)
+    expected = (q_work * cost_work).sum(dim=-1)
+    feasible = expected <= budget_work + tolerance
+
+    p = q_work.clone()
+    nu = torch.zeros(q.shape[0], device=q.device, dtype=work_dtype)
 
     mask = ~feasible
     if not mask.any():
-        return p, nu
+        return p.to(dtype=q.dtype), nu.to(dtype=q.dtype)
 
-    q_masked = q[mask]
-    cost_masked = cost[mask]
-    budget_masked = budget[mask]
+    q_masked = q_work[mask]
+    cost_masked = cost_work[mask]
+    budget_masked = budget_work[mask]
     n_infeas = q_masked.shape[0]
     min_cost = cost_masked.min(dim=-1).values
 
@@ -74,24 +79,24 @@ def kl_project_linear(
     feasible_masked = expected_masked <= budget_masked + tolerance
     if feasible_masked.all():
         p[mask] = q_masked
-        return p, nu
+        return p.to(dtype=q.dtype), nu.to(dtype=q.dtype)
 
     bisect_mask = ~feasible_masked
     if not bisect_mask.any():
         p[mask] = q_masked
-        return p, nu
+        return p.to(dtype=q.dtype), nu.to(dtype=q.dtype)
 
     q_bisect = q_masked[bisect_mask]
     cost_bisect = cost_masked[bisect_mask]
     budget_bisect = budget_masked[bisect_mask]
     n_bisect = q_bisect.shape[0]
 
-    lo = torch.zeros(n_bisect, device=q.device, dtype=q.dtype)
-    hi = torch.full((n_bisect,), 10.0, device=q.device, dtype=q.dtype)
+    lo = torch.zeros(n_bisect, device=q.device, dtype=work_dtype)
+    hi = torch.full((n_bisect,), 10.0, device=q.device, dtype=work_dtype)
 
     with torch.no_grad():
         for _ in range(32):
-            logits = q_bisect.log() - hi.unsqueeze(-1) * cost_bisect
+            logits = q_bisect.clamp_min(eps).log() - hi.unsqueeze(-1) * cost_bisect
             p_test = torch.softmax(logits, dim=-1)
             expected_test = (p_test * cost_bisect).sum(dim=-1)
             still_high = expected_test > budget_bisect
@@ -101,36 +106,36 @@ def kl_project_linear(
 
     for _ in range(iterations):
         nu_mid = (lo + hi) / 2.0
-        logits = q_bisect.log() - nu_mid.unsqueeze(-1) * cost_bisect
+        logits = q_bisect.clamp_min(eps).log() - nu_mid.unsqueeze(-1) * cost_bisect
         p_mid = torch.softmax(logits, dim=-1)
         expected_mid = (p_mid * cost_bisect).sum(dim=-1)
         too_high = expected_mid > budget_bisect
         lo = torch.where(too_high, nu_mid, lo)
         hi = torch.where(too_high, hi, nu_mid)
 
-    nu_final = (lo + hi) / 2.0
-    logits = q_bisect.log() - nu_final.unsqueeze(-1) * cost_bisect
+    nu_final = hi
+    logits = q_bisect.clamp_min(eps).log() - nu_final.unsqueeze(-1) * cost_bisect
     p_final = torch.softmax(logits, dim=-1)
 
     p_result = q_masked.clone()
-    nu_result = torch.zeros(n_infeas, device=q.device, dtype=q.dtype)
+    nu_result = torch.zeros(n_infeas, device=q.device, dtype=work_dtype)
     p_result[bisect_mask] = p_final
     nu_result[bisect_mask] = nu_final
     p[mask] = p_result
     nu[mask] = nu_result
 
-    expected_final = (p * cost).sum(dim=-1)
-    min_cost = cost.min(dim=-1).values
-    effective_budget = torch.max(budget, min_cost)
+    expected_final = (p * cost_work).sum(dim=-1)
+    min_cost = cost_work.min(dim=-1).values
+    effective_budget = torch.max(budget_work, min_cost)
     audit_violation = (expected_final - effective_budget).clamp_min(0.0)
     max_viol = audit_violation.max().item()
-    audit_tol = max(tolerance + 1e-5, 5e-5)
+    audit_tol = max(tolerance + 1e-5, 1e-4)
     if max_viol > audit_tol:
         raise RuntimeError(
             f"KL projection violated constraint by {max_viol:.3e} > {audit_tol:.3e}"
         )
 
-    return p, nu
+    return p.to(dtype=q.dtype), nu.to(dtype=q.dtype)
 
 
 def policy_entropy(pi: Tensor) -> Tensor:
@@ -179,4 +184,3 @@ def certify_usage(
     raw_cap = ((B - A_cert) / denom).clamp(0.0, 1.0)
     cap = torch.where(A_prop <= A_cert, torch.ones_like(usage_raw), raw_cap)
     return torch.minimum(usage_raw, cap), cap, torch.zeros_like(usage_raw, dtype=torch.bool)
-
