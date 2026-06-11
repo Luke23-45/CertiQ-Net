@@ -339,6 +339,13 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             except Exception:
                 pass
 
+    best_ckpt = getattr(trainer.checkpoint_callback, "best_model_path", None) if hasattr(trainer, "checkpoint_callback") else None
+    if best_ckpt and Path(best_ckpt).exists():
+        state = torch.load(best_ckpt, map_location="cpu")["state_dict"]
+        state = {k.replace("model.", ""): v for k, v in state.items()}
+        model.load_state_dict(state)
+        run_logger.info("loaded_best_checkpoint", path=best_ckpt)
+
     ckpt_path = paths.artifacts / "final_model_state.pt"
     torch.save(model.state_dict(), ckpt_path)
     manifest_path = paths.root / "manifest.json"

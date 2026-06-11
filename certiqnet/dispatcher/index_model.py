@@ -27,7 +27,7 @@ class MarginalIndexHead(nn.Module):
         super().__init__()
         self.N = N
         self.local_encoder = nn.Sequential(
-            nn.Linear(5, hidden_dim),
+            nn.Linear(6, hidden_dim),
             nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim),
             nn.GELU(),
@@ -59,6 +59,7 @@ class MarginalIndexHead(nn.Module):
                 torch.log1p(Q),
                 torch.log(mu_safe),
                 Q / mu_safe,
+                (2.0 * Q + 1.0) / mu_safe,
             ],
             dim=-1,
         )

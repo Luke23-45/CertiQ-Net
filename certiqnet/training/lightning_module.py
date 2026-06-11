@@ -70,9 +70,9 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         epoch = int(getattr(self.trainer, "current_epoch", 0))
         base = float(self.loss_fn.cfg.omega_bc)
         if epoch >= self.imitation_warmup_epochs:
-            return 0.25 * base
+            return 0.75 * base
         frac = 1.0 - (epoch / max(self.imitation_warmup_epochs, 1))
-        return base * (0.5 + 0.5 * frac)
+        return base * (0.75 + 0.25 * frac)
 
 
     def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor:
@@ -184,6 +184,16 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             ref_policies_t.reshape(-1, ref_policies_t.shape[-1]),
         )
         entropy_loss = entropies_t.mean()
+
+        # Fix C: Direct index value regression against true QMD index
+        index_mse_loss = torch.zeros((), device=Q0.device, dtype=Q0.dtype)
+        if hasattr(self.model, "tau") and init_out.proposal_logits is not None:
+            init_index_values = -init_out.proposal_logits * getattr(self.model, "tau")
+            mu_safe = (mu0.unsqueeze(1) if mu0.dim() == 1 else mu0).clamp_min(torch.finfo(Q0.dtype).tiny)
+            qmd_drift = (2.0 * Q0 + 1.0) / mu_safe
+            index_mse_loss = F.mse_loss(init_index_values, qmd_drift)
+
+        index_mse_weight = 2.0
         losses = {
             "actor": actor_loss,
             "critic": critic_loss,
@@ -193,6 +203,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             "correction": correction_loss,
             "kl": kl_loss,
             "entropy": entropy_loss,
+            "index_mse": index_mse_loss,
         }
         losses["total"] = (
             self.loss_fn.cfg.rollout_weight * actor_loss
@@ -203,6 +214,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             + self.loss_fn.cfg.omega_correction * correction_loss
             + self.loss_fn.cfg.policy_kl_weight * kl_loss
             - entropy_weight * entropy_loss
+            + index_mse_weight * index_mse_loss
         )
 
         for key, value in losses.items():
