@@ -189,7 +189,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         index_mse_loss = torch.zeros((), device=Q0.device, dtype=Q0.dtype)
         if hasattr(self.model, "tau") and init_out.proposal_logits is not None:
             init_index_values = -init_out.proposal_logits * getattr(self.model, "tau")
-            mu_safe = (mu0.unsqueeze(1) if mu0.dim() == 1 else mu0).clamp_min(torch.finfo(Q0.dtype).tiny)
+            mu_safe = (mu0.unsqueeze(0) if mu0.dim() == 1 else mu0).clamp_min(torch.finfo(Q0.dtype).tiny)
             qmd_drift = (2.0 * Q0 + 1.0) / mu_safe
             index_mse_loss = F.mse_loss(init_index_values, qmd_drift)
 
