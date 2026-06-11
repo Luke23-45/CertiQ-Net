@@ -66,7 +66,7 @@ def main() -> None:
         N=N,
         mu=mu,
         beta=beta,
-        R_cert=float(cfg.model.certificate.get("fallback_radius", float("inf"))),
+        R_cert=float(cfg.model.get("certificate", {}).get("fallback_radius", float("inf"))),
         n_random=128,
         n_grid=0,
         n_boundary=128,

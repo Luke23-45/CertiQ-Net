@@ -375,16 +375,11 @@ def _discover_and_prepare(
 ) -> tuple[RunPaths, ExperimentLogger]:
     """Prepare experiment directories, discovering the trained run if needed.
 
-    Calls ``prepare_run`` to auto-generate paths from *cfg*.  If the
-    checkpoint state does not exist at those paths (e.g. because training
-    ran in a separate call with a different auto-generated ``run_id``),
-    falls back to reading the experiment-level ``.last_run.json`` file.
+    Attempts discovery of a previous training run (via ``.last_run.json``)
+    **before** calling ``prepare_run``.  If discovery succeeds the existing
+    ``run_id`` is reused, avoiding ghost directories.  If discovery fails
+    the ``run_id`` is auto-generated as normal.
     """
-    paths, run_logger = prepare_run(cfg, cwd=cwd)
-    if read_checkpoint_state(paths.root) is not None:
-        return paths, run_logger
-
-    # ---- discovery fallback ----
     output_root = Path(str(cfg.project.get("output_root", "outputs")))
     if not output_root.is_absolute():
         output_root = (cwd / output_root).resolve()
@@ -392,15 +387,12 @@ def _discover_and_prepare(
     experiment_root = output_root / slugify(experiment_name)
 
     last = read_last_run(experiment_root)
-    if last is None:
-        return paths, run_logger  # will fail later with a clear error
+    if last is not None:
+        if "project" not in cfg:
+            cfg.project = OmegaConf.create()
+        cfg.project.run_id = last["run_id"]
+        cfg.project.experiment_name = experiment_name
 
-    # Re-run prepare_run with the discovered run_id so that the logger,
-    # manifest, and config all point to the correct trained-run directory.
-    if "project" not in cfg:
-        cfg.project = OmegaConf.create()
-    cfg.project.run_id = last["run_id"]
-    cfg.project.experiment_name = experiment_name
     paths, run_logger = prepare_run(cfg, cwd=cwd)
     return paths, run_logger
 
@@ -434,7 +426,7 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
         N=int(cfg.env.N),
         mu=mu,
         beta=float(getattr(model, "beta", 1.0)),
-        R_cert=float(cfg.model.certificate.get("fallback_radius", float("inf"))),
+        R_cert=float(cfg.model.get("certificate", {}).get("fallback_radius", float("inf"))),
         n_random=512,
         n_grid=128,
         n_boundary=128,
