@@ -7,6 +7,7 @@ import random
 import math
 import shutil
 import traceback
+import csv
 from pathlib import Path
 
 import torch
@@ -112,6 +113,32 @@ def _write_failure_artifacts(
             )
         except Exception:
             pass
+
+
+def _sync_training_metrics_alias(paths: RunPaths) -> None:
+    """Write a consolidated root-level summary of the run-local training metrics."""
+    source = paths.metrics / "training_metrics.csv"
+    if not source.exists():
+        return
+    output_root = paths.root.parents[1]
+    output_root.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, output_root / "training_metrics_timeseries.csv")
+
+    with source.open("r", newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        fieldnames = list(reader.fieldnames or [])
+        if not fieldnames:
+            return
+        summary: dict[str, str] = {k: "" for k in fieldnames}
+        for row in reader:
+            for key, value in row.items():
+                if value not in ("", None):
+                    summary[key] = value
+
+    with (output_root / "training_metrics.csv").open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerow(summary)
 
 
 def run_training(cfg: DictConfig, *, cwd: Path) -> None:
@@ -281,6 +308,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
                     source_metrics = lightning_metrics / "metrics.csv"
                     if source_metrics.exists():
                         shutil.copyfile(source_metrics, paths.metrics / "training_metrics.csv")
+                _sync_training_metrics_alias(paths)
             except Exception:
                 pass
 
