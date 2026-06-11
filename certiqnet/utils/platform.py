@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import multiprocessing
 import platform
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 import torch
 
@@ -131,3 +133,20 @@ def resolve_num_workers(requested: int | None, platform_info: PlatformInfo | Non
             return 0
         return info.safe_num_workers
     return min(requested, info.safe_num_workers)
+
+
+def windows_safe_path(path: Path) -> str:
+    """Return a path string safe for long Windows paths.
+
+    On Windows, the ``\\\\?\\`` prefix bypasses the legacy MAX_PATH limit.
+    Other platforms return the normal absolute path string.
+    """
+    resolved = path.resolve()
+    if os.name != "nt":
+        return str(resolved)
+    text = str(resolved)
+    if text.startswith("\\\\?\\"):
+        return text
+    if text.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + text[2:]
+    return "\\\\?\\" + text

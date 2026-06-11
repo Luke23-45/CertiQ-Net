@@ -17,6 +17,8 @@ from pathlib import Path
 
 import torch
 
+from certiqnet.utils.platform import windows_safe_path
+
 _CHECKPOINT_STATE_FILE = ".checkpoint_state.json"
 _LAST_RUN_FILE = ".last_run.json"
 
@@ -54,7 +56,7 @@ def save_checkpoint_state(
         status="completed",
     )
     state_file = paths_root / _CHECKPOINT_STATE_FILE
-    with open(state_file, "w") as f:
+    with open(windows_safe_path(state_file), "w", encoding="utf-8") as f:
         json.dump(asdict(state), f, indent=2)
     return state_file
 
@@ -64,7 +66,7 @@ def read_checkpoint_state(paths_root: Path) -> CheckpointState | None:
     if not state_file.exists():
         return None
     try:
-        with open(state_file) as f:
+        with open(windows_safe_path(state_file), encoding="utf-8") as f:
             data = json.load(f)
         return CheckpointState(**data)
     except (json.JSONDecodeError, TypeError, KeyError) as exc:
@@ -113,7 +115,7 @@ def load_checkpoint_weights(model: torch.nn.Module, paths_root: Path) -> None:
 def save_last_run(experiment_root: Path, *, run_id: str, experiment_name: str) -> Path:
     last_run_file = experiment_root / _LAST_RUN_FILE
     experiment_root.mkdir(parents=True, exist_ok=True)
-    with open(last_run_file, "w") as f:
+    with open(windows_safe_path(last_run_file), "w", encoding="utf-8") as f:
         json.dump({"run_id": run_id, "experiment_name": experiment_name}, f, indent=2)
     return last_run_file
 
@@ -123,7 +125,7 @@ def read_last_run(experiment_root: Path) -> dict | None:
     if not last_run_file.exists():
         return None
     try:
-        with open(last_run_file) as f:
+        with open(windows_safe_path(last_run_file), encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, TypeError) as exc:
         print(

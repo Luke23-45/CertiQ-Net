@@ -12,6 +12,7 @@ import torch
 from torch import Tensor
 
 from certiqnet.dispatcher.types import DispatcherDiagnostics
+from certiqnet.utils.platform import windows_safe_path
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,9 @@ class CertificateMetrics:
     min_certificate_slack: float
     avg_certificate_slack: float
     projection_activation_rate: float
+    projection_dual_mean: float
+    projection_slack_min: float
+    projection_slack_mean: float
     tail_fallback_activation_rate: float
     usage_activation_rate: float
     usage_mean_activation: float
@@ -100,16 +104,16 @@ def aggregate_metrics(
     weighted_cost = (cost_trace * weights).sum() / total_time
     slack = torch.cat([d.certificate_slack.detach().flatten().cpu() for d in diagnostics])
     usage_final = torch.cat([d.usage_final.detach().flatten().cpu() for d in diagnostics])
-    usage_cap_values = [d.usage_cap.detach().flatten().cpu() for d in diagnostics]
-    usage_cap = torch.cat(usage_cap_values)
     fallback = torch.cat([d.fallback_active.detach().flatten().cpu() for d in diagnostics])
+    projection_active = torch.cat([d.projection_active.detach().flatten().cpu() for d in diagnostics])
+    projection_nu = torch.cat([d.projection_nu.detach().flatten().cpu() for d in diagnostics])
+    projection_slack = torch.cat([d.projection_slack.detach().flatten().cpu() for d in diagnostics])
     correction = torch.cat([d.correction_magnitude.detach().flatten().cpu() for d in diagnostics])
     pressure_mean = torch.cat([d.pressure_mean.detach().flatten().cpu() for d in diagnostics])
     pressure_max = torch.cat([d.pressure_max.detach().flatten().cpu() for d in diagnostics])
     pressure_update_norm = torch.cat(
         [d.pressure_update_norm.detach().flatten().cpu() for d in diagnostics]
     )
-    projected = torch.isfinite(usage_cap) & (usage_final.cpu() < usage_cap - 1e-7)
     generic = GenericDispatchMetrics(
         avg_cost=float(weighted_cost.item()),
         drop_rate=float(drop_count / max(arrivals, 1)),
@@ -119,6 +123,7 @@ def aggregate_metrics(
         "avg_queue_length": float(weighted_backlog.item()),
         "latency_proxy": float((weighted_backlog / max(lam, 1e-9)).item()),
         "p95_backlog": float(torch.quantile(backlog.detach().cpu().float(), 0.95).item()),
+        "p99_backlog": float(torch.quantile(backlog.detach().cpu().float(), 0.99).item()),
         "max_backlog": float(backlog.max().item()),
     }
     
@@ -130,7 +135,10 @@ def aggregate_metrics(
         certificate_violation_rate=float((slack < -1e-5).float().mean().item()),
         min_certificate_slack=float(slack.min().item()),
         avg_certificate_slack=float(slack.mean().item()),
-        projection_activation_rate=float(projected.float().mean().item()),
+        projection_activation_rate=float(projection_active.float().mean().item()),
+        projection_dual_mean=float(projection_nu.mean().item()),
+        projection_slack_min=float(projection_slack.min().item()),
+        projection_slack_mean=float(projection_slack.mean().item()),
         tail_fallback_activation_rate=float(fallback.float().mean().item()),
         usage_activation_rate=float((usage_final > 0.1).float().mean().item()),
         usage_mean_activation=float(usage_final.mean().item()),
@@ -158,14 +166,12 @@ def save_metrics(
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / f"{filename}.json"
     csv_path = output_dir / f"{filename}.csv"
-    json_path.write_text(
-        json.dumps([asdict(metric) for metric in metrics], indent=2, sort_keys=True),
-        encoding="utf-8",
-    )
+    with open(windows_safe_path(json_path), "w", encoding="utf-8") as f:
+        f.write(json.dumps([asdict(metric) for metric in metrics], indent=2, sort_keys=True))
     rows = [metric.flat() for metric in metrics]
     if not rows:
         return
-    with csv_path.open("w", newline="", encoding="utf-8") as f:
+    with open(windows_safe_path(csv_path), "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
@@ -175,5 +181,11 @@ def save_metrics(
     if filename == "results":
         alias_csv_path = output_dir / "metrics.csv"
         alias_json_path = output_dir / "metrics.json"
-        alias_csv_path.write_text(csv_path.read_text(encoding="utf-8"), encoding="utf-8")
-        alias_json_path.write_text(json_path.read_text(encoding="utf-8"), encoding="utf-8")
+        with open(windows_safe_path(csv_path), encoding="utf-8") as f_in:
+            csv_text = f_in.read()
+        with open(windows_safe_path(json_path), encoding="utf-8") as f_in:
+            json_text = f_in.read()
+        with open(windows_safe_path(alias_csv_path), "w", encoding="utf-8") as f_out:
+            f_out.write(csv_text)
+        with open(windows_safe_path(alias_json_path), "w", encoding="utf-8") as f_out:
+            f_out.write(json_text)

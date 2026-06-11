@@ -166,6 +166,9 @@ class CertiQDispatcher(nn.Module):
             pressure_mean=pressure_mean,
             pressure_max=pressure_max,
             pressure_update_norm=pressure_update_norm.expand(Q.shape[0]),
+            projection_nu=torch.zeros(Q.shape[0], device=Q.device, dtype=Q.dtype),
+            projection_active=(usage_final < usage_raw).to(dtype=torch.bool) | fallback_active,
+            projection_slack=B_q - A_proposal,
         )
         return DispatcherForward(
             pi=pi,

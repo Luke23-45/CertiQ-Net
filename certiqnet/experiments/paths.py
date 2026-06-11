@@ -12,6 +12,8 @@ from typing import Any
 
 from omegaconf import DictConfig, OmegaConf
 
+from certiqnet.utils.platform import windows_safe_path
+
 
 @dataclass(frozen=True)
 class RunPaths:
@@ -110,14 +112,17 @@ def create_run_paths(output_root: Path, experiment_name: str, run_id: str) -> Ru
 def save_resolved_config(cfg: DictConfig, paths: RunPaths) -> Path:
     """Persist the resolved Hydra config for reproducibility."""
     out = paths.configs / "resolved_config.yaml"
-    OmegaConf.save(config=cfg, f=out, resolve=True)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with open(windows_safe_path(out), "w", encoding="utf-8") as f:
+        f.write(OmegaConf.to_yaml(cfg, resolve=True))
     return out
 
 
 def save_json(path: Path, payload: dict[str, Any]) -> None:
     """Write deterministic JSON with parent creation."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    with open(windows_safe_path(path), "w", encoding="utf-8") as f:
+        f.write(json.dumps(payload, indent=2, sort_keys=True))
 
 
 def save_manifest(

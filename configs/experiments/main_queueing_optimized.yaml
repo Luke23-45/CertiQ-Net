@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
   - /experiments/common
-  - /model: certiq_dispatcher
+  - /model: certiq_index
   - /env: family_a
   - /adapter: queueing
   - /trainer: default

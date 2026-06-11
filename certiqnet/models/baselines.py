@@ -53,6 +53,9 @@ def _diag(
         pressure_mean=torch.zeros_like(nan),
         pressure_max=torch.zeros_like(nan),
         pressure_update_norm=torch.zeros_like(nan),
+        projection_nu=torch.zeros_like(nan),
+        projection_active=torch.zeros(Q.shape[0], dtype=torch.bool, device=Q.device),
+        projection_slack=B_q - A_final,
     )
 
 

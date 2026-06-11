@@ -14,6 +14,7 @@ except ModuleNotFoundError:  # pragma: no cover
     pl = None
 
 from certiqnet.dispatcher.types import DispatcherDiagnostics
+from certiqnet.dispatcher.delay_geometry import sed_soft_policy
 from certiqnet.simulation.ctmc import CTMCEnvironment
 from certiqnet.training.loss import CertiQNetLoss
 
@@ -74,6 +75,11 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         frac = 1.0 - (epoch / max(self.imitation_warmup_epochs, 1))
         return base * (0.5 + 0.5 * frac)
 
+    def _use_soft_sed_target(self) -> bool:
+        epoch = int(getattr(self.trainer, "current_epoch", 0))
+        model_name = self.model.__class__.__name__
+        return model_name.endswith("CertiQIndexModel") and epoch < self.imitation_warmup_epochs
+
     def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor:
         """Return the analytic SED expert action without instantiating a module."""
         if mu.dim() == 1:
@@ -96,6 +102,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         )
         imitation_weight = self._imitation_weight()
         entropy_weight = self._entropy_weight()
+        use_soft_sed_target = self._use_soft_sed_target()
 
         env = CTMCEnvironment(N=int(Q0.shape[-1]), lam=float(self.cfg.env.lam), mu=mu0[0], B=Q0.shape[0])
         env.reset(Q0.detach().clone())
@@ -128,7 +135,11 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             values.append(out.value)
             rewards.append(reward)
             entropies.append(dist.entropy())
-            ref_policies.append(out.p_cert)
+            if use_soft_sed_target:
+                mu_ref = mu_obs if mu_obs.dim() == 2 else mu_obs.unsqueeze(0).expand(Q_obs.shape[0], -1)
+                ref_policies.append(sed_soft_policy(Q_obs, mu_ref))
+            else:
+                ref_policies.append(out.p_cert)
             pi_rollouts.append(out.pi)
 
         rewards_t = torch.stack(rewards, dim=0)
@@ -164,6 +175,9 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             pressure_mean=rollout_diag.pressure_mean,
             pressure_max=rollout_diag.pressure_max,
             pressure_update_norm=rollout_diag.pressure_update_norm,
+            projection_nu=rollout_diag.projection_nu,
+            projection_active=rollout_diag.projection_active,
+            projection_slack=rollout_diag.projection_slack,
         )
 
         actor_loss = self.loss_fn.actor_loss(log_probs_t.reshape(-1), advantages.reshape(-1))
@@ -190,7 +204,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         losses["total"] = (
             self.loss_fn.cfg.rollout_weight * actor_loss
             + self.loss_fn.cfg.value_weight * critic_loss
-            + self.loss_fn.cfg.omega_bc * bc_loss
+            + imitation_weight * bc_loss
             + self.loss_fn.cfg.omega_usage * usage_loss
             + self.loss_fn.cfg.omega_certificate * certificate_loss
             + self.loss_fn.cfg.omega_correction * correction_loss

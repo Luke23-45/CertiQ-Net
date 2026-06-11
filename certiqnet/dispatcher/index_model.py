@@ -144,6 +144,9 @@ class CertiQIndexModel(nn.Module):
             pressure_mean=torch.zeros(batch, device=Q.device, dtype=Q.dtype),
             pressure_max=torch.zeros(batch, device=Q.device, dtype=Q.dtype),
             pressure_update_norm=torch.zeros(batch, device=Q.device, dtype=Q.dtype),
+            projection_nu=nu,
+            projection_active=projected,
+            projection_slack=budget - a_proposal,
         )
         return DispatcherForward(
             pi=pi,

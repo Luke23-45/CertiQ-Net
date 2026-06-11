@@ -28,6 +28,9 @@ class DispatcherDiagnostics:
     pressure_mean: Tensor
     pressure_max: Tensor
     pressure_update_norm: Tensor
+    projection_nu: Tensor
+    projection_active: Tensor
+    projection_slack: Tensor
 
 
 @dataclass(frozen=True)

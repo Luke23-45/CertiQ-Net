@@ -1,5 +1,5 @@
 defaults:
-  - model: certiq_dispatcher
+  - model: certiq_index
   - env: family_a
   - adapter: queueing
   - trainer: default
@@ -9,7 +9,7 @@ defaults:
   - _self_
 
 project:
-  name: certiq-dispatcher-z3
+  name: certiq-index
   seed: 42
   output_root: outputs
   experiment_name: null
@@ -26,7 +26,7 @@ runner:
 
 sweep:
   seeds: [2] # [0, 1, 2]
-  models: [certiq_dispatcher]
+  models: [certiq_index]
   envs: [family_a, family_b, family_c, family_e]
 
 loss:

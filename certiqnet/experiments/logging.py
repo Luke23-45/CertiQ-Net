@@ -11,6 +11,8 @@ from typing import Any
 from rich.console import Console
 from rich.table import Table
 
+from certiqnet.utils.platform import windows_safe_path
+
 
 class BufferedExperimentLogger:
     """Logger with buffered CSV/JSONL writes and configurable dump cycle.
@@ -40,7 +42,7 @@ class BufferedExperimentLogger:
         self.console.log(message)
         payload: dict[str, object] = {"event": message}
         payload.update(**fields)
-        with self.events_path.open("a", encoding="utf-8") as f:
+        with open(windows_safe_path(self.events_path), "a", encoding="utf-8") as f:
             f.write(json.dumps(payload, sort_keys=True, default=str) + "\n")
 
     def metric(self, row: dict[str, Any]) -> None:
@@ -67,7 +69,7 @@ class BufferedExperimentLogger:
 
         if self._csv_fields is None:
             self._csv_fields = all_keys
-            with self.metrics_path.open("w", newline="", encoding="utf-8") as f:
+            with open(windows_safe_path(self.metrics_path), "w", newline="", encoding="utf-8") as f:
                 writer = csv.DictWriter(f, fieldnames=self._csv_fields)
                 writer.writeheader()
         elif self._csv_fields is not None:
@@ -75,11 +77,11 @@ class BufferedExperimentLogger:
             if missing:
                 self._csv_fields.extend(missing)
 
-        with self.metrics_path.open("a", newline="", encoding="utf-8") as f:
+        with open(windows_safe_path(self.metrics_path), "a", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=self._csv_fields, extrasaction="ignore")
             writer.writerows(rows)
 
-        with self.events_path.open("a", encoding="utf-8") as f:
+        with open(windows_safe_path(self.events_path), "a", encoding="utf-8") as f:
             for row in rows:
                 f.write(json.dumps({"metric": row}, sort_keys=True, default=str) + "\n")
 

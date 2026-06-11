@@ -90,7 +90,7 @@ class ProgressConfig:
 @dataclass
 class SweepConfig:
     seeds: tuple[int, ...] = (0, 1, 2)
-    models: tuple[str, ...] = ("certiq_dispatcher",)
+    models: tuple[str, ...] = ("certiq_index",)
     envs: tuple[str, ...] = ("family_a", "family_b", "family_c", "family_e")
 
 
