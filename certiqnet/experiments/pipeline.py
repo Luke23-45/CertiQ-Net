@@ -49,6 +49,18 @@ def _validate_exact_certificate_constant(model: torch.nn.Module, *, context: str
     return constant
 
 
+def _set_model_certificate_constant(cfg: DictConfig, constant: float) -> None:
+    """Write the exact-certificate constant back into the resolved config."""
+    model_cfg = cfg.model
+    if "geometry" in model_cfg and model_cfg.geometry is not None:
+        model_cfg.geometry.C = constant
+        return
+    if "C" in model_cfg:
+        model_cfg.C = constant
+        return
+    raise KeyError("Model config does not expose a geometry.C or C field.")
+
+
 def _failure_paths(
     *,
     cwd: Path,
@@ -185,7 +197,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
         model = build_model(cfg, N=int(cfg.env.N), d_xi=d_xi)
         if str(cfg.get("certificate_status", "exact")) == "exact":
             model_constant = _validate_exact_certificate_constant(model, context="training runs")
-            cfg.model.geometry.C = model_constant
+            _set_model_certificate_constant(cfg, model_constant)
             OmegaConf.save(config=cfg, f=paths.configs / "resolved_config.yaml", resolve=True)
         torch.save(model.state_dict(), paths.artifacts / "initial_model_state.pt")
 
