@@ -14,7 +14,6 @@ except ModuleNotFoundError:  # pragma: no cover
     pl = None
 
 from certiqnet.dispatcher.types import DispatcherDiagnostics
-from certiqnet.dispatcher.delay_geometry import sed_soft_policy
 from certiqnet.simulation.ctmc import CTMCEnvironment
 from certiqnet.training.loss import CertiQNetLoss
 
@@ -75,17 +74,13 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         frac = 1.0 - (epoch / max(self.imitation_warmup_epochs, 1))
         return base * (0.5 + 0.5 * frac)
 
-    def _use_soft_sed_target(self) -> bool:
-        epoch = int(getattr(self.trainer, "current_epoch", 0))
-        model_name = self.model.__class__.__name__
-        return model_name.endswith("CertiQIndexModel") and epoch < self.imitation_warmup_epochs
 
     def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor:
-        """Return the analytic SED expert action without instantiating a module."""
+        """Return the analytic QMD expert action (argmin of (2Q+1)/mu)."""
         if mu.dim() == 1:
             mu = mu.unsqueeze(0).expand(Q.shape[0], -1)
-        sed_index = (Q + 1.0) / mu.clamp_min(torch.finfo(Q.dtype).tiny)
-        return sed_index.argmin(dim=-1)
+        qmd_index = (2.0 * Q + 1.0) / mu.clamp_min(torch.finfo(Q.dtype).tiny)
+        return qmd_index.argmin(dim=-1)
 
     def training_step(self, batch: dict[str, Tensor], batch_idx: int) -> Tensor:
         """Run an on-policy rollout plus warm-start imitation and certificate regularization."""
@@ -102,7 +97,6 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         )
         imitation_weight = self._imitation_weight()
         entropy_weight = self._entropy_weight()
-        use_soft_sed_target = self._use_soft_sed_target()
 
         env = CTMCEnvironment(N=int(Q0.shape[-1]), lam=float(self.cfg.env.lam), mu=mu0[0], B=Q0.shape[0])
         env.reset(Q0.detach().clone())
@@ -135,11 +129,8 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             values.append(out.value)
             rewards.append(reward)
             entropies.append(dist.entropy())
-            if use_soft_sed_target:
-                mu_ref = mu_obs if mu_obs.dim() == 2 else mu_obs.unsqueeze(0).expand(Q_obs.shape[0], -1)
-                ref_policies.append(sed_soft_policy(Q_obs, mu_ref))
-            else:
-                ref_policies.append(out.p_cert)
+            # Always use p_cert (soft QMD) as the KL reference
+            ref_policies.append(out.p_cert)
             pi_rollouts.append(out.pi)
 
         rewards_t = torch.stack(rewards, dim=0)
@@ -149,12 +140,14 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         ref_policies_t = torch.stack(ref_policies, dim=0)
         pi_rollouts_t = torch.stack(pi_rollouts, dim=0)
 
+        gamma = 0.99
         returns = torch.zeros_like(rewards_t)
-        running = torch.zeros_like(rewards_t[-1])
+        # Bootstrap from value head at terminal step
+        running = values_t[-1].detach()
         for t in range(self.rollout_horizon - 1, -1, -1):
-            running = rewards_t[t] + running
+            running = rewards_t[t] + gamma * running
             returns[t] = running
-        advantages = returns - values_t
+        advantages = returns - values_t.detach()
         advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
 
         rollout_diag = _stack_mean(policy_diagnostics)

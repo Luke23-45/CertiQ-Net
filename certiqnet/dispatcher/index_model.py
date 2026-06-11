@@ -102,7 +102,6 @@ class CertiQIndexModel(nn.Module):
         certify: bool = True,
         training_mode: bool = False,
     ) -> DispatcherForward:
-        del training_mode
         batch, n = Q.shape
         mu_b = expand_mu(Q, mu)
 
@@ -112,9 +111,11 @@ class CertiQIndexModel(nn.Module):
         p_cert = normalize_policy(torch.softmax(-drift / self.tau, dim=-1))
 
         index_values, value = self.index_head(Q, mu_b, xi)
-        q_proposal = torch.softmax(-index_values / self.tau, dim=-1)
+        # Sharpen temperature at eval to approach hard dispatch
+        effective_tau = self.tau if training_mode else self.tau / 4.0
+        q_proposal = torch.softmax(-index_values / effective_tau, dim=-1)
         q_proposal = normalize_policy(q_proposal)
-        proposal_logits = -index_values / self.tau
+        proposal_logits = -index_values / effective_tau
 
         if certify:
             pi, nu = kl_project_linear(q_proposal, drift, budget)

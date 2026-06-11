@@ -3,5 +3,5 @@ model:
   _target_: certiqnet.dispatcher.index_model.CertiQIndexModel
   hidden_dim: 128
   tau: 1.0
-  C: 5.0
+  C: 20.0
   beta: 1.0

@@ -23,6 +23,19 @@ from certiqnet.models.baselines import (
 from certiqnet.simulation.ctmc import CTMCEnvironment
 
 
+def _has_learnable_params(model: torch.nn.Module) -> bool:
+    """Return True if the model has at least one learnable parameter."""
+    return any(p.requires_grad for p in model.parameters())
+
+
+def _greedy_pi(pi: torch.Tensor) -> torch.Tensor:
+    """Convert a soft probability distribution to a one-hot argmax."""
+    idx = pi.argmax(dim=-1)
+    hard = torch.zeros_like(pi)
+    hard.scatter_(1, idx.unsqueeze(-1), 1.0)
+    return hard
+
+
 @dataclass(frozen=True)
 class RolloutConfig:
     """Rollout settings for local and cloud comparisons."""
@@ -31,6 +44,7 @@ class RolloutConfig:
     batch_size: int = 32
     max_backlog: float = 1e6
     show_progress: bool = True
+    greedy_eval: bool = True
 
 
 def build_baseline_suite(N: int, beta: float = 1.0) -> dict[str, torch.nn.Module]:
@@ -80,6 +94,9 @@ def evaluate_policy(
         Q_obs, mu_obs, xi_obs = adapter.make_observation(env.Q, mu_b)
         with torch.no_grad():
             pi, diag = model(Q_obs, mu_obs, xi_obs, training_mode=False)
+        # Use argmax dispatch for learned models to match hard baselines
+        if rollout.greedy_eval and _has_learnable_params(model):
+            pi = _greedy_pi(pi)
         out = env.step(pi)
         queue_trace.append(out["Q"].detach().cpu())
         cost_trace.append(out["cost"].detach().cpu())
