@@ -49,181 +49,255 @@ def _validate_exact_certificate_constant(model: torch.nn.Module, *, context: str
     return constant
 
 
+def _failure_paths(
+    *,
+    cwd: Path,
+    paths: RunPaths | None,
+    stage: str,
+) -> tuple[Path, Path]:
+    """Return stable paths for persisting failure artifacts."""
+    if paths is not None:
+        failure_dir = paths.metrics
+    else:
+        failure_dir = (cwd / "outputs" / "_uncaught_failures").resolve()
+    failure_dir.mkdir(parents=True, exist_ok=True)
+    return failure_dir / f"{stage}_failure.json", failure_dir / f"{stage}_traceback.txt"
+
+
+def _write_failure_artifacts(
+    *,
+    cwd: Path,
+    paths: RunPaths | None,
+    stage: str,
+    error: BaseException,
+    tb: str,
+    logger: ExperimentLogger | None = None,
+) -> None:
+    """Persist failure details without letting secondary errors hide the crash."""
+    failure_json, failure_txt = _failure_paths(cwd=cwd, paths=paths, stage=stage)
+    payload = {
+        "stage": stage,
+        "error_type": type(error).__name__,
+        "message": str(error),
+        "traceback": tb,
+    }
+    try:
+        failure_json.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        failure_txt.write_text(tb, encoding="utf-8")
+    except Exception:
+        pass
+    if logger is not None:
+        try:
+            logger.info(
+                f"{stage}_failed",
+                error_type=type(error).__name__,
+                message=str(error),
+                failure_json=str(failure_json),
+                failure_traceback=str(failure_txt),
+            )
+        except Exception:
+            pass
+
+
 def run_training(cfg: DictConfig, *, cwd: Path) -> None:
     """Run the full Lightning training pipeline from a resolved config."""
+    paths: RunPaths | None = None
+    run_logger: ExperimentLogger | None = None
+    training_error: BaseException | None = None
+    training_traceback: str | None = None
     seed = int(cfg.project.seed)
     random.seed(seed)
     torch.manual_seed(seed)
 
-    platform_info = detect_platform()
-
-    if "progress" in cfg:
-        configure_progress(OmegaConf.to_container(cfg.progress, resolve=True))
-
-    if bool(cfg.get("_print_platform", True)):
-        py_ver = platform_info.python_version.split()[0]
-        gpu_str = f"{platform_info.gpu_count}x{platform_info.gpu_names}"
-        cpu_str = f"{platform_info.cpu_count_logical}log/{platform_info.cpu_count_physical}phys"
-        print(
-            f"[platform] os={platform_info.os_name} python={py_ver} "
-            f"torch={platform_info.torch_version} gpu={gpu_str} "
-            f"cpu={cpu_str} precision={platform_info.recommended_precision}"
-        )
-
-    trainer_cfg = OmegaConf.to_container(cfg.trainer, resolve=True)
-    if not isinstance(trainer_cfg, dict):
-        raise TypeError("cfg.trainer must resolve to a mapping")
-    resolved_trainer = resolve_trainer_config(trainer_cfg, platform_info)
-
-    if resolved_trainer["precision"] != str(cfg.trainer.precision):
-        print(
-            f"[platform] [warn] precision '{cfg.trainer.precision}' not supported, "
-            f"falling back to '{resolved_trainer['precision']}'"
-        )
-
-    paths, run_logger = prepare_run(cfg, cwd=cwd)
-    run_logger.info(
-        "platform_info",
-        os=platform_info.os_name,
-        python=platform_info.python_version.split()[0],
-        torch=platform_info.torch_version,
-        gpu_count=platform_info.gpu_count,
-        gpu_names=",".join(platform_info.gpu_names),
-        cpu_logical=platform_info.cpu_count_logical,
-        accelerator=resolved_trainer["accelerator"],
-        precision=resolved_trainer["precision"],
-    )
-
-    adapter = instantiate(cfg.adapter) if "adapter" in cfg else None
-    adapter_name = adapter.__class__.__name__ if adapter is not None else "QueueingAdapter"
-    d_xi = int(getattr(adapter, "context_dim", 0))
-    cert_status = str(getattr(adapter, "CERTIFICATE_STATUS", "exact"))
-    assumptions_satisfied = bool(getattr(adapter, "assumptions_satisfied", False))
-    cfg_cert_status = str(cfg.get("certificate_status", "exact"))
-
-    if cfg_cert_status == "exact" and cert_status != "exact":
-        raise ValueError(
-            f"Constraint Violation: Config specifies 'exact' certification, but adapter "
-            f"'{adapter_name}' provides '{cert_status}'. Update config to "
-            f"'certificate_status=approximate'."
-        )
-
-    env_target = str(cfg.get("env", {}).get("_target_", "QueueingCTMC"))
-    if cfg_cert_status == "exact" and "QueueingCTMC" not in env_target:
-        raise ValueError(
-            "Constraint Violation: Exact certification requires the QueueingCTMC backend. "
-            f"Found backend target: {env_target}."
-        )
-
-    run_logger.info(
-        "adapter_info",
-        adapter=adapter_name,
-        context_dim=d_xi,
-        certificate_status=cert_status,
-        assumptions_satisfied=assumptions_satisfied,
-    )
-
-    mu, _ = build_mu(cfg)
-    model = build_model(cfg, N=int(cfg.env.N), d_xi=d_xi)
-    if str(cfg.get("certificate_status", "exact")) == "exact":
-        model_constant = _validate_exact_certificate_constant(model, context="training runs")
-        cfg.model.geometry.C = model_constant
-        OmegaConf.save(config=cfg, f=paths.configs / "resolved_config.yaml", resolve=True)
-    torch.save(model.state_dict(), paths.artifacts / "initial_model_state.pt")
-
-    actual_batch_size = int(cfg.get("_batch_size", 64))
-    num_workers_raw: object = resolved_trainer.get("_num_workers")
-    num_workers: int | None = num_workers_raw if isinstance(num_workers_raw, int) else None
-    max_queue = int(cfg.runner.get("max_queue", 15))
-    resample_epoch = bool(cfg.runner.get("resample_every_epoch", True))
-    dm = CertiQNetDataModule(
-        N=int(cfg.env.N),
-        mu=mu,
-        batch_size=actual_batch_size,
-        n_samples=512,
-        num_workers=num_workers,
-        adapter=adapter,
-        seed=seed,
-        max_queue=max_queue,
-        resample_every_epoch=resample_epoch,
-        policy_buffer_max=int(cfg.trainer.policy_buffer_max),
-        synthetic_mix_fraction=float(cfg.trainer.synthetic_mix_fraction),
-        teacher_mix_fraction=float(cfg.trainer.teacher_mix_fraction),
-        policy_mix_fraction=float(cfg.trainer.policy_mix_fraction),
-    )
-    run_logger.info(
-        "datamodule_info",
-        batch_size=dm.batch_size,
-        n_samples=dm.n_samples,
-        num_workers=dm._num_workers,
-        max_queue=dm.max_queue,
-    )
-
-    lightning = CertiQNetLightningModule(model, cfg)
-    logger = instantiate(cfg.logger, save_dir=str(paths.logs)) if "logger" in cfg else False
-    callbacks = [instantiate(cb) for cb in cfg.get("callbacks", {}).values()]
-
-    if bool(cfg.project.get("save_checkpoints", True)):
-        callbacks.append(
-            pl.callbacks.ModelCheckpoint(
-                dirpath=str(paths.checkpoints),
-                filename="{epoch:04d}",
-                monitor="val/selection_score",
-                mode="min",
-                save_last=True,
-                save_top_k=3,
-                every_n_epochs=1,
-            )
-        )
-    callbacks.append(pl.callbacks.LearningRateMonitor(logging_interval="step"))
-
-    if bool(cfg.runner.get("show_progress", True)):
-        callbacks.append(
-            pl.callbacks.TQDMProgressBar(refresh_rate=int(cfg.runner.get("refresh_rate", 10)))
-        )
-
-    trainer = pl.Trainer(
-        max_epochs=int(cfg.trainer.max_epochs),
-        accelerator=resolved_trainer["accelerator"],
-        devices=resolved_trainer["devices"],
-        precision=resolved_trainer["precision"],
-        gradient_clip_val=float(cfg.trainer.gradient_clip_val),
-        val_check_interval=float(cfg.trainer.val_check_interval),
-        log_every_n_steps=int(cfg.trainer.log_every_n_steps),
-        logger=logger,
-        callbacks=callbacks,
-        default_root_dir=str(paths.root),
-    )
-
-    resume = cfg.project.get("resume_from_checkpoint")
-    run_logger.info("starting_training", checkpoint=str(resume) if resume else None)
-    training_error: Exception | None = None
-    training_traceback: str | None = None
     try:
-        trainer.fit(lightning, datamodule=dm, ckpt_path=str(resume) if resume else None)
-    except Exception as exc:  # pragma: no cover - exercised in failure runs
-        training_error = exc
-        training_traceback = traceback.format_exc()
-        raise
-    finally:
-        if logger is not False and hasattr(logger, "flush"):
+        platform_info = detect_platform()
+
+        if "progress" in cfg:
+            configure_progress(OmegaConf.to_container(cfg.progress, resolve=True))
+
+        if bool(cfg.get("_print_platform", True)):
+            py_ver = platform_info.python_version.split()[0]
+            gpu_str = f"{platform_info.gpu_count}x{platform_info.gpu_names}"
+            cpu_str = f"{platform_info.cpu_count_logical}log/{platform_info.cpu_count_physical}phys"
+            print(
+                f"[platform] os={platform_info.os_name} python={py_ver} "
+                f"torch={platform_info.torch_version} gpu={gpu_str} "
+                f"cpu={cpu_str} precision={platform_info.recommended_precision}"
+            )
+
+        trainer_cfg = OmegaConf.to_container(cfg.trainer, resolve=True)
+        if not isinstance(trainer_cfg, dict):
+            raise TypeError("cfg.trainer must resolve to a mapping")
+        resolved_trainer = resolve_trainer_config(trainer_cfg, platform_info)
+
+        if resolved_trainer["precision"] != str(cfg.trainer.precision):
+            print(
+                f"[platform] [warn] precision '{cfg.trainer.precision}' not supported, "
+                f"falling back to '{resolved_trainer['precision']}'"
+            )
+
+        paths, run_logger = prepare_run(cfg, cwd=cwd)
+        run_logger.info(
+            "platform_info",
+            os=platform_info.os_name,
+            python=platform_info.python_version.split()[0],
+            torch=platform_info.torch_version,
+            gpu_count=platform_info.gpu_count,
+            gpu_names=",".join(platform_info.gpu_names),
+            cpu_logical=platform_info.cpu_count_logical,
+            accelerator=resolved_trainer["accelerator"],
+            precision=resolved_trainer["precision"],
+        )
+
+        adapter = instantiate(cfg.adapter) if "adapter" in cfg else None
+        adapter_name = adapter.__class__.__name__ if adapter is not None else "QueueingAdapter"
+        d_xi = int(getattr(adapter, "context_dim", 0))
+        cert_status = str(getattr(adapter, "CERTIFICATE_STATUS", "exact"))
+        assumptions_satisfied = bool(getattr(adapter, "assumptions_satisfied", False))
+        cfg_cert_status = str(cfg.get("certificate_status", "exact"))
+
+        if cfg_cert_status == "exact" and cert_status != "exact":
+            raise ValueError(
+                f"Constraint Violation: Config specifies 'exact' certification, but adapter "
+                f"'{adapter_name}' provides '{cert_status}'. Update config to "
+                f"'certificate_status=approximate'."
+            )
+
+        env_target = str(cfg.get("env", {}).get("_target_", "QueueingCTMC"))
+        if cfg_cert_status == "exact" and "QueueingCTMC" not in env_target:
+            raise ValueError(
+                "Constraint Violation: Exact certification requires the QueueingCTMC backend. "
+                f"Found backend target: {env_target}."
+            )
+
+        run_logger.info(
+            "adapter_info",
+            adapter=adapter_name,
+            context_dim=d_xi,
+            certificate_status=cert_status,
+            assumptions_satisfied=assumptions_satisfied,
+        )
+
+        mu, _ = build_mu(cfg)
+        model = build_model(cfg, N=int(cfg.env.N), d_xi=d_xi)
+        if str(cfg.get("certificate_status", "exact")) == "exact":
+            model_constant = _validate_exact_certificate_constant(model, context="training runs")
+            cfg.model.geometry.C = model_constant
+            OmegaConf.save(config=cfg, f=paths.configs / "resolved_config.yaml", resolve=True)
+        torch.save(model.state_dict(), paths.artifacts / "initial_model_state.pt")
+
+        actual_batch_size = int(cfg.get("_batch_size", 64))
+        num_workers_raw: object = resolved_trainer.get("_num_workers")
+        num_workers: int | None = num_workers_raw if isinstance(num_workers_raw, int) else None
+        max_queue = int(cfg.runner.get("max_queue", 15))
+        resample_epoch = bool(cfg.runner.get("resample_every_epoch", True))
+        dm = CertiQNetDataModule(
+            N=int(cfg.env.N),
+            mu=mu,
+            batch_size=actual_batch_size,
+            n_samples=512,
+            num_workers=num_workers,
+            adapter=adapter,
+            seed=seed,
+            max_queue=max_queue,
+            resample_every_epoch=resample_epoch,
+            policy_buffer_max=int(cfg.trainer.policy_buffer_max),
+            synthetic_mix_fraction=float(cfg.trainer.synthetic_mix_fraction),
+            teacher_mix_fraction=float(cfg.trainer.teacher_mix_fraction),
+            policy_mix_fraction=float(cfg.trainer.policy_mix_fraction),
+        )
+        run_logger.info(
+            "datamodule_info",
+            batch_size=dm.batch_size,
+            n_samples=dm.n_samples,
+            num_workers=dm._num_workers,
+            max_queue=dm.max_queue,
+        )
+
+        lightning = CertiQNetLightningModule(model, cfg)
+        logger = instantiate(cfg.logger, save_dir=str(paths.logs)) if "logger" in cfg else False
+        callbacks = [instantiate(cb) for cb in cfg.get("callbacks", {}).values()]
+
+        if bool(cfg.project.get("save_checkpoints", True)):
+            callbacks.append(
+                pl.callbacks.ModelCheckpoint(
+                    dirpath=str(paths.checkpoints),
+                    filename="{epoch:04d}",
+                    monitor="val/selection_score",
+                    mode="min",
+                    save_last=True,
+                    save_top_k=3,
+                    every_n_epochs=1,
+                )
+            )
+        callbacks.append(pl.callbacks.LearningRateMonitor(logging_interval="step"))
+
+        if bool(cfg.runner.get("show_progress", True)):
+            callbacks.append(
+                pl.callbacks.TQDMProgressBar(refresh_rate=int(cfg.runner.get("refresh_rate", 10)))
+            )
+
+        trainer = pl.Trainer(
+            max_epochs=int(cfg.trainer.max_epochs),
+            accelerator=resolved_trainer["accelerator"],
+            devices=resolved_trainer["devices"],
+            precision=resolved_trainer["precision"],
+            gradient_clip_val=float(cfg.trainer.gradient_clip_val),
+            val_check_interval=float(cfg.trainer.val_check_interval),
+            log_every_n_steps=int(cfg.trainer.log_every_n_steps),
+            logger=logger,
+            callbacks=callbacks,
+            default_root_dir=str(paths.root),
+        )
+
+        resume = cfg.project.get("resume_from_checkpoint")
+        run_logger.info("starting_training", checkpoint=str(resume) if resume else None)
+        try:
+            trainer.fit(lightning, datamodule=dm, ckpt_path=str(resume) if resume else None)
+        finally:
             try:
-                logger.flush()
+                if logger is not False and hasattr(logger, "flush"):
+                    try:
+                        logger.flush()
+                    except Exception:
+                        pass
+                if logger is not False and hasattr(logger, "log_dir"):
+                    lightning_metrics = Path(str(getattr(logger, "log_dir")))
+                    source_metrics = lightning_metrics / "metrics.csv"
+                    if source_metrics.exists():
+                        shutil.copyfile(source_metrics, paths.metrics / "training_metrics.csv")
             except Exception:
                 pass
-        if logger is not False and hasattr(logger, "log_dir"):
-            lightning_metrics = Path(str(getattr(logger, "log_dir")))
-            source_metrics = lightning_metrics / "metrics.csv"
-            if source_metrics.exists():
-                shutil.copyfile(source_metrics, paths.metrics / "training_metrics.csv")
-        if training_error is not None:
-            failure_path = paths.metrics / "training_failure.json"
-            failure_payload = {
-                "error_type": type(training_error).__name__,
-                "message": str(training_error),
-                "traceback": training_traceback,
-            }
-            failure_path.write_text(json.dumps(failure_payload, indent=2, sort_keys=True), encoding="utf-8")
+
+    except BaseException as exc:  # pragma: no cover - failure path
+        training_error = exc
+        training_traceback = traceback.format_exc()
+        if run_logger is not None:
+            try:
+                run_logger.info(
+                    "training_failed",
+                    error_type=type(exc).__name__,
+                    message=str(exc),
+                )
+            except Exception:
+                pass
+        raise
+    finally:
+        if training_error is not None and training_traceback is not None:
+            try:
+                _write_failure_artifacts(
+                    cwd=cwd,
+                    paths=paths,
+                    stage="training",
+                    error=training_error,
+                    tb=training_traceback,
+                    logger=run_logger,
+                )
+            except Exception:
+                pass
 
     ckpt_path = paths.artifacts / "final_model_state.pt"
     torch.save(model.state_dict(), ckpt_path)

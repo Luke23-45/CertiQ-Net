@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
+import traceback
 
 from hydra import compose, initialize_config_dir
 from omegaconf import DictConfig
@@ -42,6 +43,7 @@ def run_stage(name: str, fn: Callable[[], None]) -> None:
         fn()
     except Exception:
         print(f"\n>>> Stage Failed: {name}")
+        traceback.print_exc()
         raise
     print(f"\n>>> Stage Completed: {name}")
 
