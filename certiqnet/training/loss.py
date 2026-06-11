@@ -1,11 +1,22 @@
 """Training loss components for CertiQ-Net."""
 
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 from torch import Tensor
+from torch import nn
 
 from certiqnet.dispatcher.types import DispatcherDiagnostics
 from certiqnet.utils.config_schemas import LossConfig
+
+
+def oracle_bc_loss(policy_logits: Tensor, oracle_action: Tensor) -> Tensor:
+    """Cross-entropy between policy logits and the oracle action."""
+    return F.cross_entropy(policy_logits, oracle_action)
+
+
+def oracle_mse_loss(index_values: Tensor, delta_v: Tensor) -> Tensor:
+    """Mean-squared error between learned index values and oracle marginal values."""
+    return F.mse_loss(index_values, delta_v)
 
 
 class CertiQNetLoss(nn.Module):

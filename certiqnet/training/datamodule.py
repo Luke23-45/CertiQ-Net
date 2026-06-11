@@ -101,7 +101,7 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
         self._policy_buffer.append(Q.detach().cpu())
 
     def record_teacher_states(self, Q: Tensor) -> None:
-        """Store states used for JSWQ warm-start labels."""
+        """Store states used for SED warm-start labels."""
         self._teacher_buffer.append(Q.detach().cpu())
 
     def _build_train(self) -> None:

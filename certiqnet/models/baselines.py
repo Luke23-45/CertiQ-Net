@@ -132,3 +132,103 @@ class JoinShortestWeightedQueue(nn.Module):
         pi.scatter_(1, idx.unsqueeze(-1), 1.0)
         pi = normalize_policy(pi)
         return pi, _diag(pi, pi, Q, mu_b, self.beta, self.C)
+
+
+class ShortestExpectedDelay(nn.Module):
+    """Greedy route to the shortest expected delay ``(Q_i + 1) / mu_i``."""
+
+    def __init__(self, N: int, beta: float = 1.0, C: float = float("inf")) -> None:
+        super().__init__()
+        self.N = N
+        self.beta = beta
+        self.C = C
+
+    def forward(
+        self, Q: Tensor, mu: Tensor, xi: Tensor | None = None, training_mode: bool = False
+    ) -> tuple[Tensor, DispatcherDiagnostics]:
+        del xi, training_mode
+        device = _baseline_device(self, Q)
+        Q = Q.to(device=device)
+        mu = mu.to(device=device, dtype=Q.dtype)
+        mu_b = _expand_mu(Q, mu)
+        idx = ((Q + 1.0) / mu_b).argmin(dim=-1)
+        pi = torch.zeros_like(Q)
+        pi.scatter_(1, idx.unsqueeze(-1), 1.0)
+        pi = normalize_policy(pi)
+        return pi, _diag(pi, pi, Q, mu_b, self.beta, self.C)
+
+
+class QuadraticMinDrift(nn.Module):
+    """Greedy route minimizing quadratic drift ``(2 * Q_i + 1) / mu_i``."""
+
+    def __init__(self, N: int, beta: float = 1.0, C: float = float("inf")) -> None:
+        super().__init__()
+        self.N = N
+        self.beta = beta
+        self.C = C
+
+    def forward(
+        self, Q: Tensor, mu: Tensor, xi: Tensor | None = None, training_mode: bool = False
+    ) -> tuple[Tensor, DispatcherDiagnostics]:
+        del xi, training_mode
+        device = _baseline_device(self, Q)
+        Q = Q.to(device=device)
+        mu = mu.to(device=device, dtype=Q.dtype)
+        mu_b = _expand_mu(Q, mu)
+        idx = ((2.0 * Q + 1.0) / mu_b).argmin(dim=-1)
+        pi = torch.zeros_like(Q)
+        pi.scatter_(1, idx.unsqueeze(-1), 1.0)
+        pi = normalize_policy(pi)
+        return pi, _diag(pi, pi, Q, mu_b, self.beta, self.C)
+
+
+class SoftSED(nn.Module):
+    """Stochastic route with softmax over expected-delay indices."""
+
+    def __init__(
+        self, N: int, tau: float = 1.0, beta: float = 1.0, C: float = float("inf")
+    ) -> None:
+        super().__init__()
+        self.N = N
+        self.tau = tau
+        self.beta = beta
+        self.C = C
+
+    def forward(
+        self, Q: Tensor, mu: Tensor, xi: Tensor | None = None, training_mode: bool = False
+    ) -> tuple[Tensor, DispatcherDiagnostics]:
+        del xi, training_mode
+        device = _baseline_device(self, Q)
+        Q = Q.to(device=device)
+        mu = mu.to(device=device, dtype=Q.dtype)
+        mu_b = _expand_mu(Q, mu)
+        logits = -((Q + 1.0) / mu_b) / self.tau
+        pi = torch.softmax(logits, dim=-1)
+        pi = normalize_policy(pi)
+        return pi, _diag(pi, pi, Q, mu_b, self.beta, self.C)
+
+
+class SoftQuadraticMinDrift(nn.Module):
+    """Stochastic route with softmax over quadratic-drift indices."""
+
+    def __init__(
+        self, N: int, tau: float = 1.0, beta: float = 1.0, C: float = float("inf")
+    ) -> None:
+        super().__init__()
+        self.N = N
+        self.tau = tau
+        self.beta = beta
+        self.C = C
+
+    def forward(
+        self, Q: Tensor, mu: Tensor, xi: Tensor | None = None, training_mode: bool = False
+    ) -> tuple[Tensor, DispatcherDiagnostics]:
+        del xi, training_mode
+        device = _baseline_device(self, Q)
+        Q = Q.to(device=device)
+        mu = mu.to(device=device, dtype=Q.dtype)
+        mu_b = _expand_mu(Q, mu)
+        logits = -((2.0 * Q + 1.0) / mu_b) / self.tau
+        pi = torch.softmax(logits, dim=-1)
+        pi = normalize_policy(pi)
+        return pi, _diag(pi, pi, Q, mu_b, self.beta, self.C)

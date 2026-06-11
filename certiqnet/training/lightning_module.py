@@ -75,12 +75,11 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         return base * (0.5 + 0.5 * frac)
 
     def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor:
-        """Return the analytic JSWQ expert action without instantiating a module."""
-        beta = float(self.model.beta)
+        """Return the analytic SED expert action without instantiating a module."""
         if mu.dim() == 1:
             mu = mu.unsqueeze(0).expand(Q.shape[0], -1)
-        weighted = Q / mu.pow(beta).clamp_min(torch.finfo(Q.dtype).tiny)
-        return weighted.argmin(dim=-1)
+        sed_index = (Q + 1.0) / mu.clamp_min(torch.finfo(Q.dtype).tiny)
+        return sed_index.argmin(dim=-1)
 
     def training_step(self, batch: dict[str, Tensor], batch_idx: int) -> Tensor:
         """Run an on-policy rollout plus warm-start imitation and certificate regularization."""

@@ -14,7 +14,11 @@ from certiqnet.experiments.progress import progress
 from certiqnet.models.baselines import (
     AnalyticBackbonePolicy,
     JoinShortestWeightedQueue,
+    QuadraticMinDrift,
     RandomPolicy,
+    ShortestExpectedDelay,
+    SoftQuadraticMinDrift,
+    SoftSED,
 )
 from certiqnet.simulation.ctmc import CTMCEnvironment
 
@@ -35,6 +39,10 @@ def build_baseline_suite(N: int, beta: float = 1.0) -> dict[str, torch.nn.Module
         "random": RandomPolicy(N=N, beta=beta),
         "jswq": JoinShortestWeightedQueue(N=N, beta=beta),
         "backbone": AnalyticBackbonePolicy(N=N, beta=beta),
+        "sed": ShortestExpectedDelay(N=N, beta=beta),
+        "qmd": QuadraticMinDrift(N=N, beta=beta),
+        "soft_sed": SoftSED(N=N, tau=1.0, beta=beta),
+        "soft_qmd": SoftQuadraticMinDrift(N=N, tau=1.0, beta=beta),
     }
 
 
