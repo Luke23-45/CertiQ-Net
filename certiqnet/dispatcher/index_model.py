@@ -69,8 +69,9 @@ class MarginalIndexHead(nn.Module):
         z_global = self.global_encoder(z_global)
         z_global_expanded = z_global.unsqueeze(1).expand(-1, n, -1)
         z_combined = torch.cat([z_local, z_global_expanded], dim=-1)
-        index_values = self.index_head(z_combined).squeeze(-1)
+        residual = self.index_head(z_combined).squeeze(-1)
         value = self.value_head(z_global).squeeze(-1)
+        index_values = qmd_drift + residual
         return index_values, value
 
 
