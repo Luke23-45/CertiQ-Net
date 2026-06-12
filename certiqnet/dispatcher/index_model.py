@@ -52,6 +52,7 @@ class MarginalIndexHead(nn.Module):
         del xi
         batch, n = Q.shape
         mu_safe = mu.clamp_min(torch.finfo(mu.dtype).tiny)
+        qmd_drift = (2.0 * Q + 1.0) / mu_safe
         features = torch.stack(
             [
                 Q,
@@ -59,7 +60,7 @@ class MarginalIndexHead(nn.Module):
                 torch.log1p(Q),
                 torch.log(mu_safe),
                 Q / mu_safe,
-                (2.0 * Q + 1.0) / mu_safe,
+                qmd_drift,
             ],
             dim=-1,
         )
@@ -159,6 +160,7 @@ class CertiQIndexModel(nn.Module):
             usage_raw=diag.usage_raw,
             usage_final=diag.usage_final,
             proposal_logits=proposal_logits,
+            index_values=index_values,
         )
 
     def forward(

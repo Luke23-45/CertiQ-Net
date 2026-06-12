@@ -45,3 +45,4 @@ class DispatcherForward:
     usage_raw: Tensor
     usage_final: Tensor
     proposal_logits: Tensor
+    index_values: Tensor | None = None

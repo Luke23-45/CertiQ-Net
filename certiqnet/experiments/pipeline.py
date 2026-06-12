@@ -339,12 +339,33 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             except Exception:
                 pass
 
-    best_ckpt = getattr(trainer.checkpoint_callback, "best_model_path", None) if hasattr(trainer, "checkpoint_callback") else None
-    if best_ckpt and Path(best_ckpt).exists():
-        state = torch.load(best_ckpt, map_location="cpu")["state_dict"]
-        state = {k[6:]: v for k, v in state.items() if k.startswith("model.")}
-        model.load_state_dict(state, strict=False)
-        run_logger.info("loaded_best_checkpoint", path=best_ckpt)
+    # Prefer the best checkpoint (by val/selection_score) over final epoch weights.
+    best_ckpt_loaded = False
+    for cb in trainer.callbacks:
+        if isinstance(cb, pl.callbacks.ModelCheckpoint) and cb.best_model_path:
+            best_path = Path(cb.best_model_path)
+            if best_path.exists():
+                try:
+                    best_state = torch.load(str(best_path), map_location="cpu", weights_only=False)
+                    # Lightning checkpoints store model weights under "state_dict"
+                    if "state_dict" in best_state:
+                        # Strip "model." prefix from Lightning state_dict keys
+                        raw_sd = best_state["state_dict"]
+                        cleaned = {
+                            k.removeprefix("model."): v for k, v in raw_sd.items()
+                        }
+                        model.load_state_dict(cleaned)
+                    else:
+                        model.load_state_dict(best_state)
+                    best_ckpt_loaded = True
+                    run_logger.info(
+                        "loaded_best_checkpoint",
+                        path=str(best_path),
+                        score=f"{cb.best_model_score:.4f}" if cb.best_model_score is not None else "N/A",
+                    )
+                except Exception as e:
+                    run_logger.info("best_checkpoint_load_failed", error=str(e))
+            break
 
     ckpt_path = paths.artifacts / "final_model_state.pt"
     torch.save(model.state_dict(), ckpt_path)
