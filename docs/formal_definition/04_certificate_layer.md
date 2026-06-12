@@ -2,153 +2,136 @@
 
 ## 1. Certificate Quantity
 
-For any policy \(\pi\), define:
-
+For any policy \(\pi\) and any dispatch geometry \(d(Q,\mu)\), define the
+arrival coordinate
 \[
-A_\pi(Q)=\sum_i \pi_i(Q,\mu,\xi)y_i(Q).
+A_\pi(Q,\mu)=\sum_i \pi_i(Q,\mu,\xi)\,d_i(Q,\mu).
 \]
 
-The certified envelope is:
+The certificate compares the proposed arrival coordinate to a state-dependent
+budget \(B(Q,\mu)\).
 
+For the legacy dispatcher, the canonical geometry is
 \[
-B(Q)=m(Q)+C.
+y_i^\beta(Q)=Q_i/\mu_i^\beta,
+\qquad
+B(Q,\mu)=\min_i y_i^\beta(Q)+C.
 \]
 
-The certificate condition is:
-
+For the index model, the canonical geometry is the quadratic drift index
 \[
-A_{\pi^\Theta}(Q)\le B(Q).
+d_i^{QMD}(Q,\mu)=\frac{2Q_i+1}{\mu_i},
+\qquad
+B(Q,\mu)=\min_i d_i^{QMD}(Q,\mu)+C.
 \]
 
-For the current z2 CTMC theorem, \(C=C_B\), the exact constant from the
-analytic backbone proof.
+## 2. Exact KL Projection
 
-## 2. Admissible Dispatch Set
-
-At state \(Q\), define the admissible simplex:
-
+The learned index model certifies by solving
 \[
-\mathcal P_{\mathrm{cert}}(Q)
+\pi^\star
 =
-\{\pi\in\Delta_N:A_\pi(Q)\le B(Q)\}.
+\arg\min_{\pi\in\Delta_N} KL(\pi\|q_\Theta)
+\quad\text{s.t.}\quad
+A_\pi(Q,\mu)\le B(Q,\mu).
 \]
 
-The certificate operator must return:
-
+When the constraint is active, the solution has the form
 \[
-\pi^\Theta(Q,\mu,\xi)\in\mathcal P_{\mathrm{cert}}(Q).
-\]
-
-This makes certification an action-space constraint, not an auxiliary loss.
-
-## 3. Tail Fallback Operator
-
-Define:
-
-\[
-S_\beta(Q)=\sum_i Q_i/\mu_i^\beta.
-\]
-
-For finite \(R_{\mathrm{cert}}\), the fallback operator sets:
-
-\[
-\eta=
-\eta_{\mathrm{raw}}\mathbf 1_{\{S_\beta(Q)\le R_{\mathrm{cert}}\}}.
-\]
-
-Then:
-
-\[
-\pi^\Theta
+\pi_i^\star(\nu)
 =
-(1-\eta)p^{\mathrm{cert}}+\eta p^\Theta_{\mathrm{prop}}.
+\frac{q_i \exp(-\nu d_i)}{\sum_j q_j \exp(-\nu d_j)},
+\qquad \nu\ge 0.
 \]
 
-When \(S_\beta(Q)>R_{\mathrm{cert}}\), the policy equals the certified base
-exactly.
+The Lagrange multiplier \(\nu\) is found by bisection. If the proposal already
+satisfies the budget, then \(\nu=0\) and the policy is unchanged.
 
-This operator is conservative. It certifies by making the learned proposal a
-finite-region perturbation of the base policy.
+The operator is exact at the level of the implemented numerical tolerance. It
+is not a smooth approximation of the constraint set.
 
-## 4. Drift-Envelope Projection Operator
+## 3. Scalar Usage Cap
 
-Compute:
+The legacy dispatcher does not solve the full KL problem in its main forward
+path. Instead it computes a scalar usage cap between a certified base policy
+and a proposal policy.
 
+Let
 \[
-A_{\mathrm{cert}}(Q)=A_{p^{\mathrm{cert}}}(Q),
+A_{\mathrm{cert}}(Q,\mu)=A_{p^{\mathrm{cert}}}(Q,\mu),
+\qquad
+A_{\mathrm{prop}}(Q,\mu)=A_{p^{\mathrm{prop}}}(Q,\mu).
 \]
 
-\[
-A_{\mathrm{prop}}(Q)=A_{p^\Theta_{\mathrm{prop}}}(Q).
-\]
-
-If \(A_{\mathrm{prop}}(Q)\le A_{\mathrm{cert}}(Q)\), the proposal is no worse
-than the base under the envelope coordinate and may be fully allowed:
-
-\[
-\eta_{\mathrm{safe}}=1.
-\]
-
-Otherwise:
-
+If \(A_{\mathrm{prop}}\le A_{\mathrm{cert}}\), the proposal is no worse under
+the certificate coordinate and may be used fully. Otherwise the safe usage cap
+is
 \[
 \eta_{\mathrm{safe}}
 =
 \left[
-\frac{B(Q)-A_{\mathrm{cert}}(Q)}
-{A_{\mathrm{prop}}(Q)-A_{\mathrm{cert}}(Q)}
+\frac{B-A_{\mathrm{cert}}}{A_{\mathrm{prop}}-A_{\mathrm{cert}}}
 \right]_0^1.
 \]
 
-The final usage is:
+The final usage is the minimum of the raw usage preference and the safe cap.
 
+## 4. Fallback Mode
+
+The fallback mode is a tail-safe mode for the legacy dispatcher.
+
+Let
 \[
-\eta=\min(\eta_{\mathrm{raw}},\eta_{\mathrm{safe}}).
+S_\beta(Q)=\sum_i Q_i/\mu_i^\beta.
 \]
 
-The final policy:
-
+For a chosen radius \(R_{\mathrm{cert}}\), the dispatcher uses the learned
+proposal only when
 \[
-\pi^\Theta=(1-\eta)p^{\mathrm{cert}}+\eta p^\Theta_{\mathrm{prop}}
+S_\beta(Q)\le R_{\mathrm{cert}}.
 \]
 
-satisfies:
+Outside that region, the final policy equals the certified base policy.
 
-\[
-A_{\pi^\Theta}(Q)\le B(Q).
-\]
+This is conservative by construction. It makes the learned policy a finite
+region perturbation of a stabilizing base policy.
 
-This operator certifies by pointwise envelope preservation.
+## 5. Certificate Modes
 
-## 5. Diagnostics Contract
+The supported modes are:
 
-Every certified forward pass must emit:
+1. `projection`
+   - legacy scalar usage cap,
+   - learned proposal is mixed with the base policy.
+2. `fallback`
+   - learned proposal is disabled outside a tail radius.
+3. `uncertified`
+   - raw proposal is returned for ablation only.
+4. exact KL projection
+   - used by `CertiQIndexModel`.
+
+Only the explicitly chosen mode is guaranteed at inference time.
+
+## 6. Diagnostics Contract
+
+Every certified forward pass must report:
 
 1. \(A_{\mathrm{cert}}\),
-2. \(A_{\mathrm{prop}}\),
-3. \(A_{\pi^\Theta}\),
+2. \(A_{\mathrm{proposal}}\),
+3. \(A_{\mathrm{final}}\),
 4. \(m(Q)\),
 5. \(B(Q)\),
-6. \(B(Q)-A_{\pi^\Theta}\),
-7. raw proposal usage,
-8. final proposal usage,
-9. projection cap when applicable,
-10. fallback indicator when applicable,
-11. residual magnitude,
-12. final policy entropy,
-13. selected resource or action distribution summary.
+6. \(B(Q)-A_{\mathrm{final}}\),
+7. usage raw,
+8. usage final,
+9. usage cap,
+10. fallback flag,
+11. correction magnitude,
+12. policy entropy,
+13. selected resource,
+14. projection multiplier,
+15. projection activation flag,
+16. projection slack.
 
-These are architecture diagnostics. They are not optional experiment metadata.
-
-## 6. Invalid Certificate Patterns
-
-The following do not certify the architecture:
-
-1. adding a drift penalty without exact enforcement,
-2. using stale probabilities for projection,
-3. projecting one policy and dispatching another,
-4. using smooth fallback at inference without a separate proof,
-5. claiming CTMC stability for adapters that violate the CTMC model,
-6. allowing approximate projection without a numerical tolerance contract and
-   proof that the resulting error preserves drift.
-
+These diagnostics are part of the formal contract, not optional experiment
+metadata.

@@ -1,7 +1,8 @@
 # Research References
 
-This file records sources that inform the z3 architecture. It separates
-external research support from CertiQ-specific theorem claims.
+This file records sources that inform the implemented CertiQ dispatcher
+family. It separates external research support from CertiQ-specific theorem
+claims.
 
 ## 1. Transformer Architecture Discipline
 
@@ -15,13 +16,13 @@ Source:
 What it supports:
 
 The paper supports the design lesson that a strong architecture can be organized
-around a small reusable primitive. For the Transformer, that primitive is
-attention-based sequence transduction.
+around a small reusable primitive. For CertiQ, that lesson informs the shared
+proposal/certificate separation.
 
 What it does not support:
 
 It does not support any queueing stability theorem, Lyapunov certificate, or
-dispatch guarantee for CertiQ Dispatcher.
+dispatch guarantee for CertiQ.
 
 ## 2. Permutation-Invariant Set Processing
 
@@ -54,7 +55,7 @@ Source:
 What it supports:
 
 This source supports attention-based encoders for unordered resource sets.
-It is useful if z3 replaces simple pooling with resource-set attention.
+It is useful for the legacy reflected-pressure proposal module.
 
 What it does not support:
 
@@ -75,7 +76,8 @@ inequality has already been proved.
 
 What it does not support:
 
-It does not prove the CertiQ base envelope or the z3 architecture.
+It does not prove the CertiQ base envelope, the legacy certificate layer, or
+the index-model projection operator.
 
 ## 5. Queueing Stability And MaxWeight Context
 
@@ -94,10 +96,43 @@ be designed through queue-aware scheduling and Lyapunov-style reasoning.
 
 What it does not support:
 
-It does not prove the CertiQ Dispatcher architecture or the exact z2 backbone
-constant.
+It does not prove the CertiQ dispatcher family, the exact z2 backbone
+constant, or the KL-projected index model.
 
-## 6. Existing CertiQ z2 Proof Package
+## 6. Shortest-Delay Routing And Heterogeneous Servers
+
+Sources:
+
+- A shortest-expected-delay routing result for heterogeneous queues.
+- A heterogeneous-server routing paper that compares JSQ-style and SED-style
+  rules.
+
+What it supports:
+
+These sources justify the inclusion of SED and quadratic-min-drift baselines.
+They also justify treating heterogeneous service rates as part of the routing
+geometry rather than as a cosmetic parameter.
+
+What it does not support:
+
+They do not prove that the learned model beats every classical routing rule.
+
+## 7. Exact Projection As An Implemented Operator
+
+The KL projection used by `CertiQIndexModel` is an exact convex-optimization
+operator implemented in code. It is an implementation fact, not a project-local
+stability theorem.
+
+What it supports:
+
+It supports a clean certificate boundary for the index model.
+
+What it does not support:
+
+It does not by itself prove positive recurrence or any long-run queueing
+optimality claim.
+
+## 8. Existing CertiQ z2 Proof Package
 
 Source:
 
@@ -106,13 +141,13 @@ Source:
 
 What it supports:
 
-These project-local proofs support the current analytic base envelope,
+These project-local proofs support the legacy analytic base envelope,
 explicit \(C_B\), CTMC positive Harris recurrence for the base policy, hard
-fallback inheritance, and exact projection inheritance.
+fallback inheritance, and exact projection inheritance for the legacy
+dispatcher path.
 
 What it does not support:
 
 They do not prove arbitrary neural residual stability, approximate projection,
 smooth fallback certification, or exact CTMC certification for adapters that
 violate the declared CTMC model.
-

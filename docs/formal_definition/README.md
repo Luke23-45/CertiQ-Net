@@ -1,11 +1,22 @@
-# CertiQ Dispatcher Formal Definition
+# CertiQ Formal Definition
 
-This directory defines the z3 CertiQ Dispatcher architecture.
+This directory documents the implemented CertiQ dispatch family and keeps the
+formal description aligned with the code that is actually running.
 
-The purpose of z3 is not to patch the old model names. It is to state the
-architecture from first principles before any implementation rewrite happens.
-The core object is a certified online dispatcher for assigning arriving work to
-heterogeneous capacity-constrained resources.
+The repository currently ships two implemented certified dispatcher paths:
+
+1. `CertiQDispatcher`
+   - legacy reflected-pressure architecture,
+   - analytic base geometry,
+   - scalar usage cap or fallback certification.
+2. `CertiQIndexModel`
+   - learned marginal-cost index architecture,
+   - SED/QMD-aligned geometry,
+   - exact KL projection onto a drift budget.
+
+The formal chapters below describe the common queueing model, the dispatcher
+family, the certificate layer, the training objectives, and the reflected
+pressure extension.
 
 ## Reading Order
 
@@ -17,45 +28,41 @@ heterogeneous capacity-constrained resources.
 6. [06_research_references.md](./06_research_references.md)
 7. [07_reflected_pressure_research.md](./07_reflected_pressure_research.md)
 
-## z3 Thesis
+## Canonical Thesis
 
-CertiQ Dispatcher is a certified differentiable architecture for online
-assignment:
+The canonical implementation pattern is a certified dispatch operator:
 
 \[
-\pi^\Theta(Q,\mu,\xi)
+\pi^\Theta
 =
-\mathcal C_Q\left(
-\mathcal A_\Theta(Q,\mu,\xi),
+\mathcal C_Q\!\left(
+\mathcal A_\Theta(Q,\mu,\xi,p),
 \mathcal B(Q,\mu)
-\right).
+\right),
 \]
 
-Here:
+where \(\mathcal B\) is the base geometry, \(\mathcal A_\Theta\) is the
+learned proposal, \(p\) is an optional reflected pressure state, and
+\(\mathcal C_Q\) is the certificate operator.
 
-1. \(\mathcal B\) is the certified base dispatch geometry,
-2. \(\mathcal A_\Theta\) is the learned assignment proposal,
-3. \(\mathcal C_Q\) is the state-dependent certificate operator,
-4. \(\pi^\Theta\) is the final dispatch distribution.
-
-The architecture is not defined by preview implementation history. It is the
-composition of base geometry, learned proposal, and certificate operator.
+For the newer index model, the final policy is the KL projection of a learned
+marginal-cost proposal onto a delay-aligned budget. For the legacy dispatcher,
+the final policy is a scalar mixture of a certified base policy and a learned
+proposal, capped by the certificate layer.
 
 ## Relationship To z2
 
-The z2 material remains the current proof package for the CTMC model:
+The z2 material remains the proof package for the legacy analytic base model:
 
 - [../../z2/formal_math/01_backbone_stability_and_constant.md](../../z2/formal_math/01_backbone_stability_and_constant.md)
 - [../../z2/formal_math/02_gate_inheritance_theorems.md](../../z2/formal_math/02_gate_inheritance_theorems.md)
 
-z3 reuses proven z2 facts where they apply, but it changes the architecture
-language. In z3, certificate mechanisms are first-class operators, not gates
-attached after a neural policy has already been designed.
+The new index model is implemented in code, but any global stability claim for
+that model remains a theorem obligation unless separately proved.
 
 ## Non-Goals
 
-This directory does not implement the rewrite.
+This directory does not re-prove the queueing theorems.
 
-It also does not prove new stability theorems beyond the z2 proof package. New
-claims introduced by z3 must remain theorem obligations until separately
-proved.
+It also does not claim that the index model inherits the z2 proof package by
+default. Only the explicitly stated certificate boundaries are guaranteed.

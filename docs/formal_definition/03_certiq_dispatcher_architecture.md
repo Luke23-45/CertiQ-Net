@@ -1,42 +1,64 @@
 # CertiQ Dispatcher Architecture
 
-## 1. Canonical Equation
+## 1. Canonical Implementation Families
 
-The z3 architecture is:
+The repository implements two dispatcher families:
 
+1. `CertiQIndexModel`
+   - learned marginal-cost index,
+   - SED/QMD-aligned backbone,
+   - exact KL projection.
+2. `CertiQDispatcher`
+   - legacy reflected-pressure dispatcher,
+   - analytic base geometry,
+   - scalar usage cap with fallback modes.
+
+The common architectural pattern is:
 \[
-\pi^\Theta(Q,\mu,\xi)
+\pi^\Theta(Q,\mu,\xi,p)
 =
-\mathcal C_Q\left(
-\mathcal A_\Theta(Q,\mu,\xi),
+\mathcal C_Q\!\left(
+\mathcal A_\Theta(Q,\mu,\xi,p),
 \mathcal B(Q,\mu)
-\right).
+\right),
 \]
+where the pressure state \(p\) is optional and only used by the legacy
+dispatcher path.
 
-This equation defines the architecture.
+## 2. Index Model
 
-\(\mathcal B\) is the base certified geometry. \(\mathcal A_\Theta\) is the
-learned assignment proposal. \(\mathcal C_Q\) is the state-dependent
-certificate operator. The final policy \(\pi^\Theta\) is the only distribution
-used for dispatch.
-
-## 2. Resource Coordinates
-
-The architecture begins by computing capacity-normalized workload:
-
+The index model starts from the quadratic drift geometry
 \[
-y_i(Q)=Q_i/\mu_i^\beta,
-\qquad
-m(Q)=\min_i y_i(Q).
+d_i^{QMD}(Q,\mu)=\frac{2Q_i+1}{\mu_i}.
 \]
 
-These coordinates are not optional metadata. They are the Lyapunov geometry
-used by the certificate layer.
+The learned head predicts a residual \(r_i^\Theta\) and an index value
+\[
+\hat I_i(Q,\mu,\xi)=d_i^{QMD}(Q,\mu)+r_i^\Theta(Q,\mu,\xi).
+\]
 
-## 3. Base Certified Geometry
+The raw proposal is
+\[
+q_\Theta=\operatorname{softmax}\!\left(-\hat I_\Theta/\tau\right).
+\]
 
-The base geometry produces logits:
+The certificate layer then applies the exact KL projection onto a drift budget:
+\[
+\pi^\Theta
+=
+\arg\min_{\pi\in\Delta_N} KL(\pi\|q_\Theta)
+\quad\text{s.t.}\quad
+\sum_i \pi_i d_i^{QMD}\le d_{\min}(Q,\mu)+C.
+\]
 
+This is implemented by exponential tilting with a Lagrange multiplier. The
+operator preserves the full simplex instead of mixing between two fixed
+policies.
+
+## 3. Legacy Reflected-Pressure Dispatcher
+
+The legacy dispatcher keeps a learned proposal on top of an analytic base
+geometry:
 \[
 u_i^{\mathrm{cert}}
 =
@@ -45,144 +67,76 @@ u_i^{\mathrm{cert}}
 \alpha\frac{Q_i+c}{\mu_i^\beta}.
 \]
 
-The base policy is:
-
+The base policy is
 \[
-p^{\mathrm{cert}}
+p^{\mathrm{cert}}=\operatorname{softmax}(u^{\mathrm{cert}}).
+\]
+
+The proposal module produces a correction \(r_i^\Theta\), then shifts logits by
+an internal nonnegative pressure state \(p_i\):
+\[
+u_i^{\mathrm{prop}}
 =
-\operatorname{softmax}(u^{\mathrm{cert}}).
+u_i^{\mathrm{cert}}+r_i^\Theta-\rho p_i.
 \]
 
-For the z2 CTMC theorem, this is the analytic backbone and satisfies:
+The raw proposal is
+\[
+p^{\mathrm{prop}}=\operatorname{softmax}(u^{\mathrm{prop}}).
+\]
+
+The certificate layer then chooses one of three modes:
+
+1. `projection`
+   - return a scalar usage cap that mixes `p^{cert}` and `p^{prop}`;
+2. `fallback`
+   - keep the certified base policy outside a tail region;
+3. `uncertified`
+   - return the raw usage for ablation only.
+
+## 4. Proposal Module
+
+The proposal module is permutation equivariant. It uses shared local features,
+an invariant pooled summary, and an equivariant resource update.
+
+In the legacy path, the local features include:
 
 \[
-A_{p^{\mathrm{cert}}}(Q)\le m(Q)+C.
+[\log(1+Q_i),\log\mu_i,y_i,\mu_i/\Lambda,\log(1+p_i),\xi_i].
 \]
 
-In z3 language, the important object is not the old name "backbone". The
-important object is a certified base distribution with an arrival-envelope
-constant.
+The module returns:
 
-## 4. Learned Assignment Proposal
+1. proposal probabilities,
+2. residual correction logits,
+3. raw usage preference,
+4. value estimate for training.
 
-The proposal layer builds an equivariant score correction from resource-local
-and global information.
+## 5. Certificate Boundary
 
-Local features:
+The certificate boundary is part of the dispatcher itself. The final policy is
+the distribution passed to the simulator, trainer, and evaluator.
 
-\[
-s_i=[
-\log(1+Q_i),
-\log\mu_i,
-y_i,
-\mu_i/\Lambda,
-\xi_i
-].
-\]
+For the index model, the boundary is an exact KL projection.
+For the legacy dispatcher, the boundary is a scalar usage cap or a fallback
+rule. In both cases, certification must be explicit at inference time.
 
-Shared local encoding:
+## 6. Diagnostics
 
-\[
-z_i^0=f_{\mathrm{loc}}(s_i).
-\]
+Every forward pass emits auditable diagnostics. The core quantities are:
 
-Invariant global context:
+1. certified arrival coordinate,
+2. proposal arrival coordinate,
+3. final arrival coordinate,
+4. certificate slack,
+5. usage raw and usage final,
+6. fallback indicator when applicable,
+7. projection multiplier when applicable,
+8. projection activation flag,
+9. correction magnitude,
+10. policy entropy,
+11. selected resource summary,
+12. pressure statistics for the legacy path.
 
-\[
-g=f_{\mathrm{glob}}(\{z_i^0\}_{i=1}^N).
-\]
-
-Equivariant resource update:
-
-\[
-z_i^1=f_{\mathrm{res}}([z_i^0,g]).
-\]
-
-Proposal correction:
-
-\[
-r_i^\Theta=R_{\max}\tanh(h(z_i^1)).
-\]
-
-Proposal policy:
-
-\[
-p^\Theta_{\mathrm{prop}}
-=
-\operatorname{softmax}(u^{\mathrm{cert}}+r^\Theta).
-\]
-
-The proposal is anchored to the certified base logits. It is not a free
-black-box dispatcher.
-
-The proposal also receives a reflected pressure state \(p\), and the proposal
-logits are adjusted by a monotone pressure penalty:
-
-\[
-\operatorname{logits}(Q,\mu,\xi,p)
-=
-u^{\mathrm{cert}} + r^\Theta - \rho p.
-\]
-
-The pressure state is updated between rollout steps and between independent
-rollouts when the model is explicitly reset. It does not replace the
-certificate operator.
-
-## 5. Raw Preference For Learning
-
-The proposal layer may also produce a raw usage preference:
-
-\[
-\eta_{\mathrm{raw}}\in[0,1].
-\]
-
-\(\eta_{\mathrm{raw}}\) is not a certificate. It is only the learned desire to
-use the proposal.
-
-## 6. Proposal Mixture
-
-The proposal mixture before certification is:
-
-\[
-\pi_\eta
-=
-(1-\eta)p^{\mathrm{cert}}
-+
-\eta p^\Theta_{\mathrm{prop}}.
-\]
-
-The certificate operator chooses or modifies \(\eta\), or more generally
-projects the proposal mixture, so the final dispatch distribution is
-admissible.
-
-## 7. Certificate Operator
-
-The certificate operator receives:
-
-1. current state \(Q\),
-2. base distribution \(p^{\mathrm{cert}}\),
-3. proposal distribution \(p^\Theta_{\mathrm{prop}}\),
-4. raw usage preference \(\eta_{\mathrm{raw}}\),
-5. certificate constants and diagnostics.
-
-It returns:
-
-1. final policy \(\pi^\Theta\),
-2. final gate or projection variables,
-3. certificate diagnostics.
-
-The final policy must be the distribution used by the simulator, trainer,
-evaluator, and deployment path.
-
-## 8. Certificate Modes
-
-The canonical architecture has one reflected-pressure dispatcher and one
-certificate interface. The certificate layer may evaluate different admissible
-actions:
-
-1. projection,
-2. fallback,
-3. uncertified ablation for comparison only.
-
-These are certificate modes, not separate architectures. The dispatcher
-forward interface and diagnostics contract remain the same.
+These diagnostics are not optional logging. They are part of the architecture
+definition.

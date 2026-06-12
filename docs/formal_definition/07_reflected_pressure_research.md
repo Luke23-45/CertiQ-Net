@@ -1,7 +1,7 @@
 # Reflected Pressure Research Note
 
-This note compares the z3 CertiQ Dispatcher with the Reflected MoE formal math
-package at:
+This note compares the legacy CertiQ reflected-pressure dispatcher with the
+Reflected MoE formal math package at:
 
 ```text
 C:\Users\Hellx\Documents\Programming\python\Project\Neryva\moe_route\docs\formal_math
@@ -10,9 +10,10 @@ C:\Users\Hellx\Documents\Programming\python\Project\Neryva\moe_route\docs\formal
 The comparison is architectural. It does not claim that MoE routing theorems
 directly prove queueing-dispatch stability.
 
-The current z3 implementation uses this idea directly: pressure enters the
-learned proposal, is updated between rollout steps, and leaves the certificate
-boundary unchanged.
+The reflected-pressure idea is used only by the legacy `CertiQDispatcher`
+path: pressure enters the learned proposal, is updated between rollout steps,
+and leaves the certificate boundary unchanged. The newer `CertiQIndexModel`
+does not use this pressure state in its forward path.
 
 ## 1. What Neryva Formalizes
 
@@ -88,12 +89,12 @@ Here:
 4. \(\psi_i\) is a monotone pressure penalty,
 5. \(\rho>0\) controls how strongly pressure alters scores.
 
-This makes the learned proposal load-aware across time, instead of only
+This makes the legacy learned proposal load-aware across time, instead of only
 state-aware within one forward pass.
 
-## 3. Why This Could Improve z3
+## 3. Why This Could Improve the Legacy Dispatcher
 
-Current z3 uses:
+The legacy dispatcher uses:
 
 \[
 p_{\mathrm{prop}}
@@ -113,7 +114,7 @@ A reflected pressure state adds a second control channel:
 
 This matters because a resource can be attractive under instantaneous weighted
 queue geometry while still being overused by the learned proposal over recent
-rollout windows. Pressure would give the architecture a direct way to suppress
+rollout windows. Pressure gives the legacy architecture a direct way to suppress
 that overuse without relying on a large auxiliary balancing loss.
 
 ## 4. Pressure-Aware Proposal
@@ -156,7 +157,7 @@ Possible definitions:
 4. \(\delta\ge 0\), pressure decay.
 
 Using final certified dispatch mass instead of proposal mass controls the
-actual dispatched policy.
+actual dispatched policy in the legacy path.
 
 ## 5. Certificate Interaction
 
@@ -175,7 +176,7 @@ The certificate operator must remain after pressure adjustment:
 This ordering is important.
 
 Pressure may improve load behavior, but pressure is not itself the CTMC
-certificate. The final policy must still satisfy:
+certificate. The legacy final policy must still satisfy:
 
 \[
 A_{\pi^\Theta}(Q)\le m(Q)+C.
@@ -204,12 +205,12 @@ these obligations must be separated:
 
 The most defensible theorem is simple:
 
-> If the z3 certificate operator returns an admissible policy for every
-> proposal distribution, then replacing the proposal with a reflected-pressure
-> proposal preserves certification.
+> If the certificate operator returns an admissible policy for every proposal
+> distribution, then replacing the proposal with a reflected-pressure proposal
+> preserves certification.
 
 This theorem keeps pressure as an architecture component while leaving the
-CTMC certificate boundary unchanged.
+legacy CTMC certificate boundary unchanged.
 
 ## 7. What Does Not Transfer
 
@@ -267,7 +268,8 @@ This gives every component a role:
 4. certificate projection gives hard admissibility,
 5. diagnostics expose both certificate slack and pressure behavior.
 
-This is the implemented pressure-aware extension of z3.
+This is the implemented pressure-aware extension of the legacy CertiQ
+dispatcher.
 
 ## 9. External Research Context
 
