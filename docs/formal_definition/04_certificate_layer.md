@@ -18,12 +18,20 @@ y_i^\beta(Q)=Q_i/\mu_i^\beta,
 B(Q,\mu)=\min_i y_i^\beta(Q)+C.
 \]
 
-For the index model, the canonical geometry is the quadratic drift index
+For the index model, the canonical delay-aligned geometry is the quadratic drift
+index
 \[
 d_i^{QMD}(Q,\mu)=\frac{2Q_i+1}{\mu_i},
 \qquad
-B(Q,\mu)=\min_i d_i^{QMD}(Q,\mu)+C.
+B(Q,\mu)=\min_i d_i^{QMD}(Q,\mu)+C_d(Q).
 \]
+
+The textbook SED geometry
+\[
+d_i^{SED}(Q,\mu)=\frac{Q_i+1}{\mu_i}
+\]
+is retained as the main hard-routing baseline and as the certified tail policy
+for the learned index model.
 
 ## 2. Exact KL Projection
 
@@ -49,6 +57,11 @@ satisfies the budget, then \(\nu=0\) and the policy is unchanged.
 
 The operator is exact at the level of the implemented numerical tolerance. It
 is not a smooth approximation of the constraint set.
+
+The state-dependent budget \(C_d(Q)\) is the delay-budget slack. It may be used
+in implementation as a conservative finite-region allowance, but it is not a
+free unconstrained performance knob. Outside a certified region
+\(\|Q\|_1\le R\), the learned index policy falls back to \(\pi^{SED}\).
 
 ## 3. Scalar Usage Cap
 
@@ -96,6 +109,10 @@ Outside that region, the final policy equals the certified base policy.
 This is conservative by construction. It makes the learned policy a finite
 region perturbation of a stabilizing base policy.
 
+For the index model, the analogous tail rule is not a scalar mixture. It is a
+hard fallback to the SED policy once the state leaves the certified finite
+region.
+
 ## 5. Certificate Modes
 
 The supported modes are:
@@ -108,7 +125,8 @@ The supported modes are:
 3. `uncertified`
    - raw proposal is returned for ablation only.
 4. exact KL projection
-   - used by `CertiQIndexModel`.
+   - used by `CertiQIndexModel`,
+   - combined with a certified SED tail fallback.
 
 Only the explicitly chosen mode is guaranteed at inference time.
 

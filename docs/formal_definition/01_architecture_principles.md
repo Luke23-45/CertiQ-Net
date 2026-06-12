@@ -24,7 +24,8 @@ The current codebase implements two certified dispatcher families:
    - scalar usage cap or fallback certification.
 2. `CertiQIndexModel`
    - learned marginal-cost index architecture,
-   - exact KL projection onto a drift budget,
+   - SED/QMD-aligned geometry,
+   - exact KL projection onto a delay-aligned budget with finite-region SED fallback,
    - no reflected pressure in the forward path.
 
 ## 2. Architectural Discipline
@@ -57,7 +58,7 @@ The implemented system separates into three layers.
 ### 3.1 Geometry Layer
 
 The geometry layer maps queue state and capacity into a dispatch energy. The
-project currently exposes two related geometries:
+project currently exposes three related geometries:
 
 \[
 y_i^{\beta}(Q)=Q_i/\mu_i^\beta,
@@ -69,7 +70,9 @@ d_i^{QMD}(Q,\mu)=\frac{2Q_i+1}{\mu_i}.
 
 `CertiQDispatcher` uses the capacity-normalized workload geometry
 \(y_i^\beta(Q)\) as its certificate coordinate. `CertiQIndexModel` uses the
-quadratic drift geometry \(d_i^{QMD}\) as the backbone for the learned index.
+quadratic drift geometry \(d_i^{QMD}\) as the fixed backbone for the learned
+index, while `SED` remains the primary hard-routing baseline and tail fallback
+for the learned region.
 
 ### 3.2 Proposal Layer
 
@@ -77,7 +80,7 @@ The proposal layer learns performance corrections. It may use context
 \(\xi\), resource-local features, pooled set summaries, or reflected pressure.
 In the current implementation the legacy dispatcher uses a permutation-equivariant
 proposal module, while the index model learns a marginal-cost residual on top of
-the quadratic drift index.
+the delay-aligned drift index.
 
 The proposal layer is not the source of certification. It is the source of
 adaptivity and performance.

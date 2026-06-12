@@ -66,6 +66,15 @@ The current implementation supports three useful supervision targets:
 2. quadratic-min-drift targets,
 3. small-system oracle targets where available.
 
+For the oracle targets, the relevant label is the action-value difference
+\[
+\Delta V_i(Q)=V(Q+e_i)-V(Q),
+\]
+with the target action
+\[
+i^\star_{oracle}=\arg\min_i \Delta V_i(Q).
+\]
+
 The legacy dispatcher also uses an internal pressure state during training and
 evaluation. That pressure state is a nonnegative controller memory that shifts
 proposal logits away from repeatedly preferred resources while leaving the
@@ -83,6 +92,10 @@ Performance metrics:
 4. p99 backlog,
 5. maximum observed backlog,
 6. latency proxy where applicable.
+
+When stochastic sampling is used, evaluation should also report the greedy or
+argmax policy result on the same state bank so sampled and deterministic
+behavior can be compared directly.
 
 Certificate metrics:
 
@@ -128,4 +141,5 @@ For the index model, a practical curriculum is:
 1. initialize from the quadratic drift index,
 2. distill soft SED/QMD behavior,
 3. activate KL projection during all evaluations,
-4. reduce entropy only after the projection operator is stable.
+4. keep the certified SED tail fallback active outside the finite region,
+5. reduce entropy only after the projection operator is stable.

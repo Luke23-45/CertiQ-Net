@@ -179,7 +179,7 @@ Pressure may improve load behavior, but pressure is not itself the CTMC
 certificate. The legacy final policy must still satisfy:
 
 \[
-A_{\pi^\Theta}(Q)\le m(Q)+C.
+A_{\pi^\Theta}(Q,\mu)\le B(Q,\mu).
 \]
 
 Therefore reflected pressure is a proposal-control mechanism. It is not a
