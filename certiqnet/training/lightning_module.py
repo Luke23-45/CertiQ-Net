@@ -47,8 +47,8 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         self.cfg = cfg
         self.loss_fn = CertiQNetLoss(cfg.loss)
         self.rollout_horizon = int(cfg.trainer.rollout_horizon)
-        self.pretrain_epochs = int(cfg.trainer.pretrain_epochs)
-        self.finetune_epochs = int(cfg.trainer.finetune_epochs)
+        self.pretrain_epochs = int(getattr(cfg.trainer, "pretrain_epochs", 0))
+        self.finetune_epochs = int(getattr(cfg.trainer, "finetune_epochs", 0))
         self.entropy_warmup_epochs = int(cfg.trainer.entropy_warmup_epochs)
         self.imitation_warmup_epochs = int(cfg.trainer.imitation_warmup_epochs)
         if hasattr(self, "save_hyperparameters"):
