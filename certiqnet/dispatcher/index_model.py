@@ -126,7 +126,7 @@ class CertiQIndexModel(nn.Module):
         p_cert = normalize_policy(torch.softmax(-drift / self.tau, dim=-1))
 
         index_values, value = self.index_head(Q, mu_b, xi)
-        effective_tau = self.tau if training_mode else self.tau / 4.0
+        effective_tau = self.tau
         q_proposal = torch.softmax(-index_values / effective_tau, dim=-1)
         q_proposal = normalize_policy(q_proposal)
         proposal_logits = -index_values / effective_tau

@@ -70,9 +70,23 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         epoch = int(getattr(self.trainer, "current_epoch", 0))
         base = float(self.loss_fn.cfg.omega_bc)
         if epoch >= self.imitation_warmup_epochs:
-            return 0.75 * base
+            # Linearly decay to 0 over the next 30 epochs
+            post_warmup = epoch - self.imitation_warmup_epochs
+            decay_epochs = 30
+            if post_warmup >= decay_epochs:
+                return 0.0
+            return base * 0.75 * (1.0 - post_warmup / decay_epochs)
         frac = 1.0 - (epoch / max(self.imitation_warmup_epochs, 1))
         return base * (0.5 + 0.5 * frac)
+
+    def _supervised_weight(self) -> float:
+        """Decay supervised action/margin loss weights to zero post-warmup."""
+        epoch = int(getattr(self.trainer, "current_epoch", 0))
+        if epoch >= self.imitation_warmup_epochs:
+            post_warmup = epoch - self.imitation_warmup_epochs
+            decay_epochs = 40
+            return max(0.0, 1.0 - post_warmup / decay_epochs)
+        return 1.0
 
     def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor:
         """Return the analytic QMD expert action (argmin of (2Q+1)/mu)."""
@@ -98,6 +112,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         )
         imitation_weight = self._imitation_weight()
         entropy_weight = self._entropy_weight()
+        supervised_weight = self._supervised_weight()
 
         env = CTMCEnvironment(N=int(Q0.shape[-1]), lam=float(self.cfg.env.lam), mu=mu0[0], B=Q0.shape[0])
         env.reset(Q0.detach().clone())
@@ -138,13 +153,18 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         kl_loss = torch.stack(kl_terms, dim=0).mean()
 
         gamma = 0.99
-        returns = torch.zeros_like(rewards_t)
-        # Bootstrap from value head at terminal step
-        running = values_t[-1].detach()
+        gae_lambda = 0.95
+        advantages = torch.zeros_like(rewards_t)
+        gae = torch.zeros_like(rewards_t[0])
         for t in range(self.rollout_horizon - 1, -1, -1):
-            running = rewards_t[t] + gamma * running
-            returns[t] = running
-        advantages = returns - values_t.detach()
+            if t == self.rollout_horizon - 1:
+                next_value = values_t[t].detach()  # bootstrap
+            else:
+                next_value = values_t[t + 1].detach()
+            delta = rewards_t[t] + gamma * next_value - values_t[t].detach()
+            gae = delta + gamma * gae_lambda * gae
+            advantages[t] = gae
+        returns = advantages + values_t.detach()
         advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
 
         rollout_diag = _stack_mean(policy_diagnostics)
@@ -199,8 +219,8 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             self.loss_fn.cfg.rollout_weight * actor_loss
             + self.loss_fn.cfg.value_weight * critic_loss
             + imitation_weight * bc_loss
-            + getattr(self.loss_fn.cfg, "omega_action", 0.0) * action_loss
-            + getattr(self.loss_fn.cfg, "omega_margin", 0.0) * margin_loss
+            + supervised_weight * getattr(self.loss_fn.cfg, "omega_action", 0.0) * action_loss
+            + supervised_weight * getattr(self.loss_fn.cfg, "omega_margin", 0.0) * margin_loss
             + self.loss_fn.cfg.omega_usage * usage_loss
             + self.loss_fn.cfg.omega_certificate * certificate_loss
             + self.loss_fn.cfg.omega_correction * correction_loss
