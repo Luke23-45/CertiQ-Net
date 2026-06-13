@@ -17,7 +17,7 @@ def kl_project_linear(
     cost: Tensor,
     budget: Tensor,
     *,
-    iterations: int = 64,
+    iterations: int = 48,
     tolerance: float = 1e-10,
 ) -> tuple[Tensor, Tensor]:
     """Project ``q`` onto ``{p in simplex : E_p[cost] <= budget}`` via KL.
@@ -30,7 +30,7 @@ def kl_project_linear(
         q: ``(B, N)`` proposal distribution (non-negative, rows sum to 1).
         cost: ``(B, N)`` positive cost vector (clamped to ``finfo.tiny``).
         budget: ``(B,)`` maximum allowable expected cost.
-        iterations: bisection iterations (default 64).
+        iterations: bisection iterations (default 48).
         tolerance: feasibility tolerance (default 1e-10).
 
     Returns:

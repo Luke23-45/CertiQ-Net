@@ -108,8 +108,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         values: list[Tensor] = []
         rewards: list[Tensor] = []
         entropies: list[Tensor] = []
-        ref_policies: list[Tensor] = []
-        pi_rollouts: list[Tensor] = []
+        kl_terms: list[Tensor] = []
 
         for _ in range(self.rollout_horizon):
             Q_obs = env.Q.clone()
@@ -130,16 +129,13 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             values.append(out.value)
             rewards.append(reward)
             entropies.append(dist.entropy())
-            # Always use p_cert (soft QMD) as the KL reference
-            ref_policies.append(out.p_cert)
-            pi_rollouts.append(out.pi)
+            kl_terms.append(self.loss_fn.policy_kl(out.pi, out.p_cert))
 
         rewards_t = torch.stack(rewards, dim=0)
         values_t = torch.stack(values, dim=0)
         log_probs_t = torch.stack(log_probs, dim=0)
         entropies_t = torch.stack(entropies, dim=0)
-        ref_policies_t = torch.stack(ref_policies, dim=0)
-        pi_rollouts_t = torch.stack(pi_rollouts, dim=0)
+        kl_loss = torch.stack(kl_terms, dim=0).mean()
 
         gamma = 0.99
         returns = torch.zeros_like(rewards_t)
@@ -185,10 +181,6 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         usage_loss = self.loss_fn.usage_penalty(rollout_diag.usage_final)
         certificate_loss = self.loss_fn.certificate_penalty(rollout_diag)
         correction_loss = self.loss_fn.correction_size_penalty(rollout_diag)
-        kl_loss = self.loss_fn.policy_kl(
-            pi_rollouts_t.reshape(-1, pi_rollouts_t.shape[-1]),
-            ref_policies_t.reshape(-1, ref_policies_t.shape[-1]),
-        )
         entropy_loss = entropies_t.mean()
         
         losses = {
@@ -222,9 +214,9 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
 
         if dm is not None:
             if hasattr(dm, "record_policy_states"):
-                dm.record_policy_states(torch.cat(visited_states, dim=0))
+                dm.record_policy_states(torch.cat(visited_states, dim=0).to("cpu", non_blocking=True))
             if hasattr(dm, "record_teacher_states"):
-                dm.record_teacher_states(Q0.detach().cpu())
+                dm.record_teacher_states(Q0.detach().to("cpu", non_blocking=True))
 
         return losses["total"]
 

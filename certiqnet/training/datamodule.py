@@ -103,10 +103,6 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
         """Store states used for heuristic warm-start labels."""
         self._teacher_buffer.append(Q.detach().cpu())
 
-    def _build_group(self, Q: Tensor, mu: Tensor) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        sed_action, qmd_action = heuristic_actions(Q, mu)
-        return Q.float(), mu.float(), sed_action, qmd_action
-
     def _build_train(self) -> None:
         """Create or refresh the mixed training dataset."""
         gen = torch.Generator().manual_seed(self.seed + self._epoch * 9973)
@@ -154,16 +150,25 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
         )
         adversarial_states = self._sample_rows(bank, adversarial_count, gen)
 
-        groups: list[tuple[Tensor, Tensor, Tensor, Tensor]] = []
-        groups.append(self._build_group(synthetic.Q, synthetic.mu))
-        groups.append(self._build_group(teacher_states.float(), self.mu.unsqueeze(0).expand(teacher_states.shape[0], -1).clone()))
-        groups.append(self._build_group(policy_states.float(), self.mu.unsqueeze(0).expand(policy_states.shape[0], -1).clone()))
-        groups.append(self._build_group(adversarial_states.float(), self.mu.unsqueeze(0).expand(adversarial_states.shape[0], -1).clone()))
-
-        Q = torch.cat([group[0] for group in groups], dim=0)
-        mu = torch.cat([group[1] for group in groups], dim=0)
-        sed_action = torch.cat([group[2] for group in groups], dim=0)
-        qmd_action = torch.cat([group[3] for group in groups], dim=0)
+        Q = torch.cat(
+            [
+                synthetic.Q.float(),
+                teacher_states.float(),
+                policy_states.float(),
+                adversarial_states.float(),
+            ],
+            dim=0,
+        )
+        mu = torch.cat(
+            [
+                synthetic.mu.float(),
+                self.mu.unsqueeze(0).expand(teacher_states.shape[0], -1),
+                self.mu.unsqueeze(0).expand(policy_states.shape[0], -1),
+                self.mu.unsqueeze(0).expand(adversarial_states.shape[0], -1),
+            ],
+            dim=0,
+        )
+        sed_action, qmd_action = heuristic_actions(Q, mu)
         cost = Q.sum(dim=-1)
 
         if self.context_dim > 0:

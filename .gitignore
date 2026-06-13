@@ -24,7 +24,7 @@ coverage.xml
 
 # Training / Logs
 outputs/
-logs/
+# logs/
 wandb/
 lightning_logs/
 *.log
@@ -53,3 +53,4 @@ temp
 docs/build_pdf
 docs/notes
 docs/proposed
+docs/logs
