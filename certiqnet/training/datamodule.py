@@ -295,6 +295,18 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
                 "oracle_delta_v": torch.stack(list(oracle_delta_v)),
                 "has_oracle": torch.stack(list(has_oracle)),
             }
+        if len(first) == 3:
+            Q, mu, cost = zip(*batch, strict=True)
+            Q, mu, cost = torch.stack(list(Q)), torch.stack(list(mu)), torch.stack(list(cost))
+            device, dtype = Q.device, Q.dtype
+            return {
+                "Q": Q, "mu": mu, "cost": cost,
+                "sed_action": torch.full((Q.shape[0],), -1, device=device, dtype=torch.long),
+                "qmd_action": torch.full((Q.shape[0],), -1, device=device, dtype=torch.long),
+                "oracle_action": torch.full((Q.shape[0],), -1, device=device, dtype=torch.long),
+                "oracle_delta_v": torch.zeros(Q.shape[0], Q.shape[1], device=device, dtype=dtype),
+                "has_oracle": torch.zeros(Q.shape[0], dtype=torch.bool, device=device),
+            }
         Q, mu, cost, sed_action, qmd_action, oracle_action, oracle_delta_v, has_oracle = zip(
             *batch,
             strict=True,
