@@ -207,8 +207,8 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             self.loss_fn.cfg.rollout_weight * actor_loss
             + self.loss_fn.cfg.value_weight * critic_loss
             + imitation_weight * bc_loss
-            + self.loss_fn.cfg.omega_action * action_loss
-            + self.loss_fn.cfg.omega_margin * margin_loss
+            + getattr(self.loss_fn.cfg, "omega_action", 0.0) * action_loss
+            + getattr(self.loss_fn.cfg, "omega_margin", 0.0) * margin_loss
             + self.loss_fn.cfg.omega_usage * usage_loss
             + self.loss_fn.cfg.omega_certificate * certificate_loss
             + self.loss_fn.cfg.omega_correction * correction_loss
