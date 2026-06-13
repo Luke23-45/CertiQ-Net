@@ -25,6 +25,10 @@ class ProposalConfig:
     local_layers: int = 2
     update_layers: int = 2
     pooling: str = "attention"
+    encoder_layers: int = 2
+    num_heads: int = 4
+    num_inducing_points: int = 4
+    dropout: float = 0.0
     correction_bound: float = 2.0
     usage_max: float = 1.0
 

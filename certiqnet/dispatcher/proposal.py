@@ -1,8 +1,15 @@
 """Permutation-equivariant learned proposal for z3 dispatch."""
 
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 from torch import Tensor
+
+from certiqnet.dispatcher.interaction import (
+    DispatchInteractionEncoder,
+    legacy_token_features,
+)
 
 
 def mlp(in_dim: int, hidden_dim: int, out_dim: int, layers: int) -> nn.Sequential:
@@ -18,7 +25,7 @@ def mlp(in_dim: int, hidden_dim: int, out_dim: int, layers: int) -> nn.Sequentia
 
 
 class SetProposal(nn.Module):
-    """Shared-local, invariant-global, equivariant proposal operator."""
+    """Shared-local, interaction-aware, equivariant proposal operator."""
 
     def __init__(
         self,
@@ -32,8 +39,13 @@ class SetProposal(nn.Module):
         pooling: str,
         correction_bound: float,
         usage_max: float,
+        encoder_layers: int = 2,
+        num_heads: int = 4,
+        num_inducing_points: int = 4,
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
+        del local_layers
         assert d_xi >= 0, "d_xi must be non-negative."
         assert pooling in {"attention", "mean"}, "pooling must be attention or mean."
         assert correction_bound > 0, "correction_bound must be positive."
@@ -42,33 +54,20 @@ class SetProposal(nn.Module):
         self.pooling = pooling
         self.correction_bound = float(correction_bound)
         self.usage_max = float(usage_max)
-        self.local = mlp(5 + d_xi, hidden_dim, d_local, local_layers)
-        self.attn = nn.Linear(d_local, 1, bias=False) if pooling == "attention" else None
-        self.global_out = nn.Linear(d_local, d_global)
+        self.encoder = DispatchInteractionEncoder(
+            feature_dim=10 + self.d_xi,
+            d_model=d_local,
+            d_global=d_global,
+            num_layers=encoder_layers,
+            num_heads=num_heads,
+            num_inducing_points=num_inducing_points,
+            dropout=dropout,
+            global_feature_dim=10,
+        )
         self.update = mlp(d_local + d_global, hidden_dim, d_local, update_layers)
         self.correction = nn.Linear(d_local, 1)
         self.usage = nn.Linear(d_global, 1)
         self.value = nn.Linear(d_global, 1)
-
-    def _features(
-        self, Q: Tensor, mu: Tensor, y: Tensor, pressure: Tensor, xi: Tensor | None
-    ) -> Tensor:
-        batch, n = Q.shape
-        lam_total = mu.sum(dim=-1, keepdim=True).clamp_min(torch.finfo(mu.dtype).tiny)
-        features = [
-            torch.log1p(Q).unsqueeze(-1),
-            torch.log(mu.clamp_min(torch.finfo(mu.dtype).tiny)).unsqueeze(-1),
-            y.unsqueeze(-1),
-            (mu / lam_total).unsqueeze(-1),
-            torch.log1p(pressure.clamp_min(0.0)).unsqueeze(-1),
-        ]
-        if xi is None:
-            if self.d_xi > 0:
-                features.append(torch.zeros(batch, n, self.d_xi, device=Q.device, dtype=Q.dtype))
-        else:
-            assert xi.shape == (batch, n, self.d_xi), "xi must have shape (B, N, d_xi)."
-            features.append(xi)
-        return torch.cat(features, dim=-1)
 
     def forward(
         self,
@@ -83,20 +82,16 @@ class SetProposal(nn.Module):
         """Return ``(p_proposal, correction, usage_raw, value)``."""
         if pressure is None:
             pressure = torch.zeros_like(Q)
-        z0 = self.local(self._features(Q, mu, y, pressure, xi))
-        if self.pooling == "attention":
-            assert self.attn is not None
-            weights = torch.softmax(self.attn(z0).squeeze(-1), dim=-1)
-            pooled = (weights.unsqueeze(-1) * z0).sum(dim=1)
-        else:
-            pooled = z0.mean(dim=1)
-        g = self.global_out(pooled)
-        z1 = self.update(torch.cat([z0, g.unsqueeze(1).expand(-1, Q.shape[1], -1)], dim=-1))
+        token_features, global_features = legacy_token_features(
+            Q, mu, y, pressure, u_cert, xi, d_xi=self.d_xi
+        )
+        z_tokens, z_global = self.encoder(token_features, global_features)
+        z1 = self.update(torch.cat([z_tokens, z_global.unsqueeze(1).expand(-1, Q.shape[1], -1)], dim=-1))
         correction = self.correction_bound * torch.tanh(self.correction(z1).squeeze(-1))
         logits = u_cert + correction - float(pressure_scale) * pressure
         p = torch.softmax(logits, dim=-1)
         p = p.clamp_min(torch.finfo(p.dtype).tiny)
         p = p / p.sum(dim=-1, keepdim=True)
-        usage_raw = self.usage_max * torch.sigmoid(self.usage(g).squeeze(-1))
-        value = self.value(g).squeeze(-1)
+        usage_raw = self.usage_max * torch.sigmoid(self.usage(z_global).squeeze(-1))
+        value = self.value(z_global).squeeze(-1)
         return p, correction, usage_raw, value

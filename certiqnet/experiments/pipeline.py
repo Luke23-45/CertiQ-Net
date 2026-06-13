@@ -247,6 +247,8 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             synthetic_mix_fraction=float(cfg.trainer.synthetic_mix_fraction),
             teacher_mix_fraction=float(cfg.trainer.teacher_mix_fraction),
             policy_mix_fraction=float(cfg.trainer.policy_mix_fraction),
+            oracle_mix_fraction=float(cfg.trainer.oracle_mix_fraction),
+            oracle_data_path=cfg.trainer.oracle_data_path,
         )
         run_logger.info(
             "datamodule_info",

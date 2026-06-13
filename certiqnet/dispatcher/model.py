@@ -58,6 +58,10 @@ class CertiQDispatcher(nn.Module):
             pooling=cfg.proposal.pooling,
             correction_bound=cfg.proposal.correction_bound,
             usage_max=cfg.proposal.usage_max,
+            encoder_layers=cfg.proposal.encoder_layers,
+            num_heads=cfg.proposal.num_heads,
+            num_inducing_points=cfg.proposal.num_inducing_points,
+            dropout=cfg.proposal.dropout,
         )
         self.register_buffer("pressure_state", torch.zeros(self.N), persistent=False)
 

@@ -12,7 +12,7 @@ The repository currently ships two implemented certified dispatcher paths:
 2. `CertiQIndexModel`
    - learned marginal-cost index architecture,
    - SED/QMD-aligned geometry,
-   - exact KL projection onto a delay-aligned budget with finite-region SED fallback.
+   - exact KL projection onto a fixed QMD budget.
 
 The formal chapters below describe the common queueing model, the dispatcher
 family, the certificate layer, the training objectives, and the reflected
@@ -46,10 +46,9 @@ learned proposal, \(p\) is an optional reflected pressure state, and
 \(\mathcal C_Q\) is the certificate operator.
 
 For the newer index model, the final policy is the KL projection of a learned
-marginal-cost proposal onto a delay-aligned budget, with a certified SED tail
-fallback outside the learned region. For the legacy dispatcher, the final
-policy is a scalar mixture of a certified base policy and a learned proposal,
-capped by the certificate layer.
+marginal-cost proposal onto a fixed QMD budget. For the legacy dispatcher, the
+final policy is a scalar mixture of a certified base policy and a learned
+proposal, capped by the certificate layer.
 
 ## Relationship To z2
 

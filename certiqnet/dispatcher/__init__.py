@@ -15,6 +15,11 @@ from certiqnet.dispatcher.delay_geometry import (
     sed_index,
     sed_soft_policy,
 )
+from certiqnet.dispatcher.interaction import (
+    DispatchInteractionEncoder,
+    index_token_features,
+    legacy_token_features,
+)
 from certiqnet.dispatcher.index_model import CertiQIndexModel, MarginalIndexHead
 from certiqnet.dispatcher.model import CertiQDispatcher
 from certiqnet.dispatcher.types import (
@@ -32,9 +37,12 @@ __all__ = [
     "DispatcherDiagnostics",
     "DispatcherForward",
     "GeometryConfig",
+    "DispatchInteractionEncoder",
     "MarginalIndexHead",
     "PressureConfig",
     "ProposalConfig",
+    "index_token_features",
+    "legacy_token_features",
     "delay_arrival_coordinate",
     "delay_envelope",
     "quadratic_drift_index",

@@ -7,7 +7,7 @@ The repository implements two dispatcher families:
 1. `CertiQIndexModel`
    - learned marginal-cost index,
    - SED/QMD-aligned backbone,
-   - exact KL projection with finite-region SED fallback.
+   - exact KL projection with a fixed QMD budget.
 2. `CertiQDispatcher`
    - legacy reflected-pressure dispatcher,
    - analytic base geometry,
@@ -42,27 +42,18 @@ The raw proposal is
 q_\Theta=\operatorname{softmax}\!\left(-\hat I_\Theta/\tau\right).
 \]
 
-The certificate layer then applies the exact KL projection onto a delay-aligned budget:
+The certificate layer then applies the exact KL projection onto a fixed QMD budget:
 \[
 \pi^\Theta
 =
 \arg\min_{\pi\in\Delta_N} KL(\pi\|q_\Theta)
 \quad\text{s.t.}\quad
-\sum_i \pi_i d_i^{QMD}\le d_{\min}(Q,\mu)+C_d(Q).
+\sum_i \pi_i d_i^{QMD}\le d_{\min}(Q,\mu)+C.
 \]
 
 This is implemented by exponential tilting with a Lagrange multiplier. The
 operator preserves the full simplex instead of mixing between two fixed
 policies.
-
-For the certified tail region, the learned index is disabled when the queue
-state leaves a finite ball:
-\[
-\|Q\|_1>R \Rightarrow \pi^\Theta=\pi^{SED}.
-\]
-
-This tail rule keeps the learned model as a finite-region perturbation of a
-classical delay-aware router.
 
 ## 3. Legacy Reflected-Pressure Dispatcher
 
@@ -126,8 +117,8 @@ The module returns:
 The certificate boundary is part of the dispatcher itself. The final policy is
 the distribution passed to the simulator, trainer, and evaluator.
 
-For the index model, the boundary is an exact KL projection with a certified
-SED tail fallback.
+For the index model, the boundary is an exact KL projection with no additional
+tail controller in the forward path.
 For the legacy dispatcher, the boundary is a scalar usage cap or a fallback
 rule. In both cases, certification must be explicit at inference time.
 

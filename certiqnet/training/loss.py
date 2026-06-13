@@ -39,6 +39,32 @@ class CertiQNetLoss(nn.Module):
         p_target = p_target.to(device=pi.device, dtype=pi.dtype)
         return torch.nn.functional.kl_div(pi.clamp_min(1e-9).log(), p_target, reduction="batchmean")
 
+    def oracle_action_loss(self, logits: Tensor, target: Tensor | None = None) -> Tensor:
+        """Cross-entropy against an oracle or heuristic action label."""
+        if target is None:
+            return torch.zeros((), device=logits.device, dtype=logits.dtype)
+        return F.cross_entropy(logits, target.to(device=logits.device, dtype=torch.long))
+
+    def delta_v_loss(self, predicted: Tensor | None, target: Tensor | None = None) -> Tensor:
+        """Regression loss for marginal-value targets."""
+        if predicted is None or target is None:
+            device = predicted.device if predicted is not None else torch.device("cpu")
+            dtype = predicted.dtype if predicted is not None else torch.float32
+            return torch.zeros((), device=device, dtype=dtype)
+        target = target.to(device=predicted.device, dtype=predicted.dtype)
+        return F.mse_loss(predicted, target)
+
+    def margin_loss(self, logits: Tensor, target: Tensor | None = None) -> Tensor:
+        """Encourage the target action logit to exceed the runner-up."""
+        if target is None:
+            return torch.zeros((), device=logits.device, dtype=logits.dtype)
+        target = target.to(device=logits.device, dtype=torch.long)
+        target_logit = logits.gather(1, target.unsqueeze(-1)).squeeze(-1)
+        masked = logits.clone()
+        masked.scatter_(1, target.unsqueeze(-1), float("-inf"))
+        runner_up = masked.max(dim=-1).values
+        return F.relu(1.0 - (target_logit - runner_up)).mean()
+
     def usage_penalty(self, usage: Tensor) -> Tensor:
         """Quadratic penalty encouraging useful proposal usage."""
         return (1.0 - usage).square().mean()
@@ -74,16 +100,28 @@ class CertiQNetLoss(nn.Module):
         cfg: LossConfig,
         *,
         imitation_target: Tensor | None = None,
+        oracle_action_target: Tensor | None = None,
+        delta_v_target: Tensor | None = None,
         ref_pi: Tensor | None = None,
         actor_log_prob: Tensor | None = None,
         advantage: Tensor | None = None,
         value: Tensor | None = None,
         target_return: Tensor | None = None,
+        policy_logits: Tensor | None = None,
+        oracle_delta_v_pred: Tensor | None = None,
         entropy_weight: float | None = None,
     ) -> dict[str, Tensor]:
         """Return all scalar loss components and total."""
         del cfg
         L_bc = self.bc_loss(pi, imitation_target)
+        L_oracle = torch.zeros((), device=pi.device, dtype=pi.dtype)
+        L_delta_v = torch.zeros((), device=pi.device, dtype=pi.dtype)
+        L_margin = torch.zeros((), device=pi.device, dtype=pi.dtype)
+        if policy_logits is not None:
+            L_oracle = self.oracle_action_loss(policy_logits, oracle_action_target)
+            L_margin = self.margin_loss(policy_logits, oracle_action_target)
+        if oracle_delta_v_pred is not None:
+            L_delta_v = self.delta_v_loss(oracle_delta_v_pred, delta_v_target)
         L_usage = self.usage_penalty(diag.usage_final)
         L_certificate = self.certificate_penalty(diag)
         L_correction = self.correction_size_penalty(diag)
@@ -101,6 +139,9 @@ class CertiQNetLoss(nn.Module):
         total = (
             self.cfg.rollout_weight * L_actor
             + self.cfg.omega_bc * L_bc
+            + self.cfg.omega_oracle * L_oracle
+            + self.cfg.omega_delta_v * L_delta_v
+            + self.cfg.omega_margin * L_margin
             + self.cfg.omega_usage * L_usage
             + self.cfg.omega_certificate * L_certificate
             + self.cfg.omega_correction * L_correction
@@ -113,6 +154,9 @@ class CertiQNetLoss(nn.Module):
             "actor": L_actor,
             "critic": L_critic,
             "bc": L_bc,
+            "oracle": L_oracle,
+            "delta_v": L_delta_v,
+            "margin": L_margin,
             "usage": L_usage,
             "certificate": L_certificate,
             "correction": L_correction,

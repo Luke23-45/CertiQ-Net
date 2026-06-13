@@ -50,17 +50,24 @@ class TrainerConfig:
     lr: float = 3e-4
     weight_decay: float = 1e-5
     rollout_horizon: int = 16
+    pretrain_epochs: int = 20
+    finetune_epochs: int = 40
     entropy_warmup_epochs: int = 20
     imitation_warmup_epochs: int = 20
     policy_buffer_max: int = 4096
     policy_mix_fraction: float = 0.25
     teacher_mix_fraction: float = 0.25
     synthetic_mix_fraction: float = 0.50
+    oracle_mix_fraction: float = 0.25
+    oracle_data_path: str | None = None
 
 
 @dataclass
 class LossConfig:
     omega_bc: float = 1.0
+    omega_oracle: float = 1.5
+    omega_delta_v: float = 0.5
+    omega_margin: float = 0.1
     omega_usage: float = 0.1
     omega_certificate: float = 5.0
     omega_correction: float = 0.01
@@ -69,6 +76,7 @@ class LossConfig:
     policy_kl_weight: float = 0.05
     value_weight: float = 1.0
     entropy_weight: float = 0.001
+    distillation_temperature: float = 1.0
 
 
 @dataclass

@@ -1,5 +1,7 @@
 """CertiQ index model for marginal-cost dispatch with KL projection."""
 
+from __future__ import annotations
+
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -11,6 +13,7 @@ from certiqnet.dispatcher.certificate import (
     policy_entropy,
 )
 from certiqnet.dispatcher.delay_geometry import quadratic_drift_index
+from certiqnet.dispatcher.interaction import DispatchInteractionEncoder, index_token_features
 from certiqnet.dispatcher.types import DispatcherDiagnostics, DispatcherForward
 
 
@@ -23,19 +26,29 @@ def expand_mu(Q: Tensor, mu: Tensor) -> Tensor:
 class MarginalIndexHead(nn.Module):
     """Learned marginal cost index I_i(Q, mu) per resource."""
 
-    def __init__(self, N: int, hidden_dim: int = 64) -> None:
+    def __init__(
+        self,
+        N: int,
+        hidden_dim: int = 64,
+        d_xi: int = 0,
+        *,
+        encoder_layers: int = 2,
+        num_heads: int = 4,
+        num_inducing_points: int = 4,
+        dropout: float = 0.0,
+    ) -> None:
         super().__init__()
         self.N = N
-        self.local_encoder = nn.Sequential(
-            nn.Linear(6, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.GELU(),
-        )
-        self.global_encoder = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, hidden_dim),
+        self.d_xi = int(d_xi)
+        self.encoder = DispatchInteractionEncoder(
+            feature_dim=6 + self.d_xi,
+            d_model=hidden_dim,
+            d_global=hidden_dim,
+            num_layers=encoder_layers,
+            num_heads=num_heads,
+            num_inducing_points=num_inducing_points,
+            dropout=dropout,
+            global_feature_dim=8,
         )
         self.index_head = nn.Sequential(
             nn.Linear(hidden_dim + hidden_dim, hidden_dim),
@@ -49,27 +62,12 @@ class MarginalIndexHead(nn.Module):
         )
 
     def forward(self, Q: Tensor, mu: Tensor, xi: Tensor | None = None) -> tuple[Tensor, Tensor]:
-        del xi
-        batch, n = Q.shape
-        mu_safe = mu.clamp_min(torch.finfo(mu.dtype).tiny)
-        qmd_drift = (2.0 * Q + 1.0) / mu_safe
-        features = torch.stack(
-            [
-                Q,
-                mu,
-                torch.log1p(Q),
-                torch.log(mu_safe),
-                Q / mu_safe,
-                qmd_drift,
-            ],
-            dim=-1,
-        )
-        z_local = self.local_encoder(features)
-        z_global = z_local.mean(dim=1)
-        z_global = self.global_encoder(z_global)
-        z_global_expanded = z_global.unsqueeze(1).expand(-1, n, -1)
+        token_features, global_features = index_token_features(Q, mu, xi, d_xi=self.d_xi)
+        z_local, z_global = self.encoder(token_features, global_features)
+        z_global_expanded = z_global.unsqueeze(1).expand(-1, Q.shape[1], -1)
         z_combined = torch.cat([z_local, z_global_expanded], dim=-1)
         residual = self.index_head(z_combined).squeeze(-1)
+        qmd_drift = quadratic_drift_index(Q, mu.clamp_min(torch.finfo(mu.dtype).tiny))
         value = self.value_head(z_global).squeeze(-1)
         index_values = qmd_drift + residual
         return index_values, value
@@ -85,13 +83,27 @@ class CertiQIndexModel(nn.Module):
         tau: float = 1.0,
         C: float = 2.0,
         beta: float = 1.0,
+        d_xi: int = 0,
+        encoder_layers: int = 2,
+        num_heads: int = 4,
+        num_inducing_points: int = 4,
+        dropout: float = 0.0,
     ) -> None:
         super().__init__()
         self.N = N
         self.tau = tau
         self.C = C
         self.beta = beta
-        self.index_head = MarginalIndexHead(N, hidden_dim=hidden_dim)
+        self.d_xi = int(d_xi)
+        self.index_head = MarginalIndexHead(
+            N,
+            hidden_dim=hidden_dim,
+            d_xi=self.d_xi,
+            encoder_layers=encoder_layers,
+            num_heads=num_heads,
+            num_inducing_points=num_inducing_points,
+            dropout=dropout,
+        )
 
     def reset_dispatch_state(self) -> None:
         """Stateless model; kept for API compatibility."""
@@ -114,7 +126,6 @@ class CertiQIndexModel(nn.Module):
         p_cert = normalize_policy(torch.softmax(-drift / self.tau, dim=-1))
 
         index_values, value = self.index_head(Q, mu_b, xi)
-        # Sharpen temperature at eval to approach hard dispatch
         effective_tau = self.tau if training_mode else self.tau / 4.0
         q_proposal = torch.softmax(-index_values / effective_tau, dim=-1)
         q_proposal = normalize_policy(q_proposal)

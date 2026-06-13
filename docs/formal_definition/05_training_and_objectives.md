@@ -60,11 +60,9 @@ tolerance.
 The learned proposal should be trained as a correction over the certified base
 or as a marginal-cost index, not as an independent dispatcher.
 
-The current implementation supports three useful supervision targets:
-
-1. soft or hard SED targets,
-2. quadratic-min-drift targets,
-3. small-system oracle targets where available.
+The current implementation centers on quadratic-min-drift targets.
+Soft or hard SED targets remain comparison baselines, and small-system oracle
+targets may be used when available.
 
 For the oracle targets, the relevant label is the action-value difference
 \[
@@ -93,9 +91,8 @@ Performance metrics:
 5. maximum observed backlog,
 6. latency proxy where applicable.
 
-When stochastic sampling is used, evaluation should also report the greedy or
-argmax policy result on the same state bank so sampled and deterministic
-behavior can be compared directly.
+For learned models, greedy argmax evaluation is the canonical deployment
+comparison mode, and stochastic sampling remains a training-time mechanism.
 
 Certificate metrics:
 
@@ -130,7 +127,7 @@ uncertified.
 Recommended curriculum:
 
 1. verify base certificate quantities,
-2. train the proposal to imitate SED or QMD,
+2. train the proposal to imitate QMD,
 3. enable exact certificate enforcement during all policy rollouts,
 4. optimize rollout cost,
 5. audit state banks before reporting results,
@@ -139,7 +136,7 @@ Recommended curriculum:
 For the index model, a practical curriculum is:
 
 1. initialize from the quadratic drift index,
-2. distill soft SED/QMD behavior,
+2. distill soft QMD behavior,
 3. activate KL projection during all evaluations,
-4. keep the certified SED tail fallback active outside the finite region,
+4. keep the fixed QMD budget active outside the warm-start phase,
 5. reduce entropy only after the projection operator is stable.
