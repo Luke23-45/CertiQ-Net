@@ -47,8 +47,6 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         self.cfg = cfg
         self.loss_fn = CertiQNetLoss(cfg.loss)
         self.rollout_horizon = int(cfg.trainer.rollout_horizon)
-        self.pretrain_epochs = int(getattr(cfg.trainer, "pretrain_epochs", 0))
-        self.finetune_epochs = int(getattr(cfg.trainer, "finetune_epochs", 0))
         self.entropy_warmup_epochs = int(cfg.trainer.entropy_warmup_epochs)
         self.imitation_warmup_epochs = int(cfg.trainer.imitation_warmup_epochs)
         if hasattr(self, "save_hyperparameters"):
@@ -76,16 +74,6 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         frac = 1.0 - (epoch / max(self.imitation_warmup_epochs, 1))
         return base * (0.5 + 0.5 * frac)
 
-    def _supervision_weight(self) -> float:
-        epoch = int(getattr(self.trainer, "current_epoch", 0))
-        if epoch < self.pretrain_epochs:
-            return 1.0
-        if epoch < self.pretrain_epochs + self.finetune_epochs:
-            frac = 1.0 - ((epoch - self.pretrain_epochs) / max(self.finetune_epochs, 1))
-            return 0.65 + 0.35 * max(frac, 0.0)
-        return 0.35
-
-
     def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor:
         """Return the analytic QMD expert action (argmin of (2Q+1)/mu)."""
         if mu.dim() == 1:
@@ -97,11 +85,8 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         """Run an on-policy rollout plus warm-start imitation and certificate regularization."""
         del batch_idx
         Q0, mu0, xi0 = batch["Q"], batch["mu"], batch.get("xi")
-        oracle_action = batch.get("oracle_action")
         qmd_action = batch.get("qmd_action")
         sed_action = batch.get("sed_action")
-        oracle_delta_v = batch.get("oracle_delta_v")
-        has_oracle = batch.get("has_oracle")
         dm = getattr(self.trainer, "datamodule", None)
         if hasattr(self.model, "reset_dispatch_state"):
             self.model.reset_dispatch_state()
@@ -112,7 +97,6 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             dtype=init_out.pi.dtype,
         )
         imitation_weight = self._imitation_weight()
-        supervision_weight = self._supervision_weight()
         entropy_weight = self._entropy_weight()
 
         env = CTMCEnvironment(N=int(Q0.shape[-1]), lam=float(self.cfg.env.lam), mu=mu0[0], B=Q0.shape[0])
@@ -193,19 +177,11 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         actor_loss = self.loss_fn.actor_loss(log_probs_t.reshape(-1), advantages.reshape(-1))
         critic_loss = self.loss_fn.critic_loss(values_t.reshape(-1), returns.reshape(-1))
         bc_loss = self.loss_fn.bc_loss(init_out.pi, expert_pi)
-        target_action = oracle_action if oracle_action is not None else None
-        if target_action is None:
-            target_action = qmd_action if qmd_action is not None else sed_action
+        target_action = qmd_action if qmd_action is not None else sed_action
         if target_action is None:
             target_action = expert_action
-        if has_oracle is not None and oracle_action is not None:
-            oracle_mask = has_oracle.to(device=Q0.device, dtype=torch.bool)
-            fallback_action = qmd_action if qmd_action is not None else expert_action
-            target_action = torch.where(oracle_mask, oracle_action, fallback_action)
-        delta_v_pred = init_out.index_values if init_out.index_values is not None else None
-        oracle_action_loss = self.loss_fn.oracle_action_loss(init_out.proposal_logits, target_action)
+        action_loss = self.loss_fn.action_loss(init_out.proposal_logits, target_action)
         margin_loss = self.loss_fn.margin_loss(init_out.proposal_logits, target_action)
-        delta_v_loss = self.loss_fn.delta_v_loss(delta_v_pred, oracle_delta_v)
         usage_loss = self.loss_fn.usage_penalty(rollout_diag.usage_final)
         certificate_loss = self.loss_fn.certificate_penalty(rollout_diag)
         correction_loss = self.loss_fn.correction_size_penalty(rollout_diag)
@@ -219,9 +195,8 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             "actor": actor_loss,
             "critic": critic_loss,
             "bc": bc_loss,
-            "oracle": oracle_action_loss,
+            "action": action_loss,
             "margin": margin_loss,
-            "delta_v": delta_v_loss,
             "usage": usage_loss,
             "certificate": certificate_loss,
             "correction": correction_loss,
@@ -232,9 +207,8 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             self.loss_fn.cfg.rollout_weight * actor_loss
             + self.loss_fn.cfg.value_weight * critic_loss
             + imitation_weight * bc_loss
-            + supervision_weight * oracle_action_loss
-            + supervision_weight * getattr(self.loss_fn.cfg, "omega_margin", 0.0) * margin_loss
-            + supervision_weight * getattr(self.loss_fn.cfg, "omega_delta_v", 0.0) * delta_v_loss
+            + self.loss_fn.cfg.omega_action * action_loss
+            + self.loss_fn.cfg.omega_margin * margin_loss
             + self.loss_fn.cfg.omega_usage * usage_loss
             + self.loss_fn.cfg.omega_certificate * certificate_loss
             + self.loss_fn.cfg.omega_correction * correction_loss

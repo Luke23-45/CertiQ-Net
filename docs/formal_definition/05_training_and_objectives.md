@@ -61,17 +61,9 @@ The learned proposal should be trained as a correction over the certified base
 or as a marginal-cost index, not as an independent dispatcher.
 
 The current implementation centers on quadratic-min-drift targets.
-Soft or hard SED targets remain comparison baselines, and small-system oracle
-targets may be used when available.
-
-For the oracle targets, the relevant label is the action-value difference
-\[
-\Delta V_i(Q)=V(Q+e_i)-V(Q),
-\]
-with the target action
-\[
-i^\star_{oracle}=\arg\min_i \Delta V_i(Q).
-\]
+Soft or hard SED targets remain comparison baselines. The heuristic labels are
+available at inference time and can be used for supervised warm-starting, but
+the default training recipe should not depend on any separate expert dataset.
 
 The legacy dispatcher also uses an internal pressure state during training and
 evaluation. That pressure state is a nonnegative controller memory that shifts

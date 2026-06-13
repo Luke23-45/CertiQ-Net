@@ -9,16 +9,6 @@ from certiqnet.dispatcher.types import DispatcherDiagnostics
 from certiqnet.utils.config_schemas import LossConfig
 
 
-def oracle_bc_loss(policy_logits: Tensor, oracle_action: Tensor) -> Tensor:
-    """Cross-entropy between policy logits and the oracle action."""
-    return F.cross_entropy(policy_logits, oracle_action)
-
-
-def oracle_mse_loss(index_values: Tensor, delta_v: Tensor) -> Tensor:
-    """Mean-squared error between learned index values and oracle marginal values."""
-    return F.mse_loss(index_values, delta_v)
-
-
 class CertiQNetLoss(nn.Module):
     """Total loss with individually logged z3 dispatcher components."""
 
@@ -39,20 +29,11 @@ class CertiQNetLoss(nn.Module):
         p_target = p_target.to(device=pi.device, dtype=pi.dtype)
         return torch.nn.functional.kl_div(pi.clamp_min(1e-9).log(), p_target, reduction="batchmean")
 
-    def oracle_action_loss(self, logits: Tensor, target: Tensor | None = None) -> Tensor:
-        """Cross-entropy against an oracle or heuristic action label."""
+    def action_loss(self, logits: Tensor, target: Tensor | None = None) -> Tensor:
+        """Cross-entropy against a heuristic action label."""
         if target is None:
             return torch.zeros((), device=logits.device, dtype=logits.dtype)
         return F.cross_entropy(logits, target.to(device=logits.device, dtype=torch.long))
-
-    def delta_v_loss(self, predicted: Tensor | None, target: Tensor | None = None) -> Tensor:
-        """Regression loss for marginal-value targets."""
-        if predicted is None or target is None:
-            device = predicted.device if predicted is not None else torch.device("cpu")
-            dtype = predicted.dtype if predicted is not None else torch.float32
-            return torch.zeros((), device=device, dtype=dtype)
-        target = target.to(device=predicted.device, dtype=predicted.dtype)
-        return F.mse_loss(predicted, target)
 
     def margin_loss(self, logits: Tensor, target: Tensor | None = None) -> Tensor:
         """Encourage the target action logit to exceed the runner-up."""
@@ -100,28 +81,23 @@ class CertiQNetLoss(nn.Module):
         cfg: LossConfig,
         *,
         imitation_target: Tensor | None = None,
-        oracle_action_target: Tensor | None = None,
-        delta_v_target: Tensor | None = None,
+        action_target: Tensor | None = None,
         ref_pi: Tensor | None = None,
         actor_log_prob: Tensor | None = None,
         advantage: Tensor | None = None,
         value: Tensor | None = None,
         target_return: Tensor | None = None,
         policy_logits: Tensor | None = None,
-        oracle_delta_v_pred: Tensor | None = None,
         entropy_weight: float | None = None,
     ) -> dict[str, Tensor]:
         """Return all scalar loss components and total."""
         del cfg
         L_bc = self.bc_loss(pi, imitation_target)
-        L_oracle = torch.zeros((), device=pi.device, dtype=pi.dtype)
-        L_delta_v = torch.zeros((), device=pi.device, dtype=pi.dtype)
+        L_action = torch.zeros((), device=pi.device, dtype=pi.dtype)
         L_margin = torch.zeros((), device=pi.device, dtype=pi.dtype)
         if policy_logits is not None:
-            L_oracle = self.oracle_action_loss(policy_logits, oracle_action_target)
-            L_margin = self.margin_loss(policy_logits, oracle_action_target)
-        if oracle_delta_v_pred is not None:
-            L_delta_v = self.delta_v_loss(oracle_delta_v_pred, delta_v_target)
+            L_action = self.action_loss(policy_logits, action_target)
+            L_margin = self.margin_loss(policy_logits, action_target)
         L_usage = self.usage_penalty(diag.usage_final)
         L_certificate = self.certificate_penalty(diag)
         L_correction = self.correction_size_penalty(diag)
@@ -139,8 +115,7 @@ class CertiQNetLoss(nn.Module):
         total = (
             self.cfg.rollout_weight * L_actor
             + self.cfg.omega_bc * L_bc
-            + self.cfg.omega_oracle * L_oracle
-            + self.cfg.omega_delta_v * L_delta_v
+            + self.cfg.omega_action * L_action
             + self.cfg.omega_margin * L_margin
             + self.cfg.omega_usage * L_usage
             + self.cfg.omega_certificate * L_certificate
@@ -154,8 +129,7 @@ class CertiQNetLoss(nn.Module):
             "actor": L_actor,
             "critic": L_critic,
             "bc": L_bc,
-            "oracle": L_oracle,
-            "delta_v": L_delta_v,
+            "action": L_action,
             "margin": L_margin,
             "usage": L_usage,
             "certificate": L_certificate,

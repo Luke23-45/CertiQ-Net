@@ -58,15 +58,12 @@ class TrainerConfig:
     policy_mix_fraction: float = 0.25
     teacher_mix_fraction: float = 0.25
     synthetic_mix_fraction: float = 0.50
-    oracle_mix_fraction: float = 0.25
-    oracle_data_path: str | None = None
 
 
 @dataclass
 class LossConfig:
     omega_bc: float = 1.0
-    omega_oracle: float = 1.5
-    omega_delta_v: float = 0.5
+    omega_action: float = 1.5
     omega_margin: float = 0.1
     omega_usage: float = 0.1
     omega_certificate: float = 5.0
