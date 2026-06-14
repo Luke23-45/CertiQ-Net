@@ -135,6 +135,7 @@ def run_baseline_comparison(
     models = build_baseline_suite(N=N)
     if extra_models:
         models.update(extra_models)
+    import copy
     metrics = [
         evaluate_policy(
             name=name,
@@ -145,7 +146,7 @@ def run_baseline_comparison(
             lam=lam,
             mu=mu,
             rollout=rollout,
-            adapter=adapter,
+            adapter=copy.deepcopy(adapter) if adapter is not None else None,
         )
         for name, model in models.items()
     ]

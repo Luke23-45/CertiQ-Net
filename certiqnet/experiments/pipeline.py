@@ -29,7 +29,11 @@ from certiqnet.experiments.metrics import aggregate_metrics, save_metrics
 from certiqnet.experiments.paths import RunPaths, slugify
 from certiqnet.experiments.runner import experiment_name_from_cfg, prepare_run
 from certiqnet.data.synthetic.datamodule import CertiQNetDataModule
-from certiqnet.train.common.module import BaseCertiQLightningModule as CertiQNetLightningModule
+from certiqnet.train.common.loss import CertiQNetLoss
+from certiqnet.train.queueing.module import QueueingLightningModule
+from certiqnet.train.channel.module import ChannelLightningModule
+from certiqnet.train.moe.module import MoELightningModule
+from certiqnet.train.robotics.module import RoboticsLightningModule
 from certiqnet.utils.platform import detect_platform, resolve_trainer_config
 from certiqnet.utils.progress import configure_progress
 
@@ -256,7 +260,45 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             max_queue=dm.max_queue,
         )
 
-        lightning = CertiQNetLightningModule(model, cfg)
+        loss_fn = CertiQNetLoss(
+            omega_bc=float(cfg.loss.omega_bc),
+            omega_action=float(cfg.loss.get("omega_action", 1.5)),
+            omega_margin=float(cfg.loss.get("omega_margin", 0.1)),
+            omega_usage=float(cfg.loss.omega_usage),
+            omega_certificate=float(cfg.loss.omega_certificate),
+            omega_correction=float(cfg.loss.omega_correction),
+            rollout_weight=float(cfg.loss.rollout_weight),
+            policy_kl_weight=float(cfg.loss.policy_kl_weight),
+            value_weight=float(cfg.loss.value_weight),
+            entropy_weight=float(cfg.loss.entropy_weight),
+        )
+
+        module_kwargs = dict(
+            model=model,
+            loss_fn=loss_fn,
+            lr=float(cfg.trainer.lr),
+            weight_decay=float(cfg.trainer.weight_decay),
+            rollout_horizon=int(cfg.trainer.rollout_horizon),
+            use_ppo=bool(getattr(cfg.trainer, "use_ppo", False)),
+            ppo_epochs=int(getattr(cfg.trainer, "ppo_epochs", 4)),
+            ppo_clip_epsilon=float(getattr(cfg.trainer, "ppo_clip_epsilon", 0.2)),
+            ppo_manual_clip_val=float(getattr(cfg.trainer, "ppo_manual_clip_val", 1.0)),
+            entropy_warmup_epochs=int(cfg.trainer.entropy_warmup_epochs),
+            imitation_warmup_epochs=int(cfg.trainer.imitation_warmup_epochs),
+            entropy_weight=float(cfg.loss.entropy_weight),
+            lam=float(cfg.env.lam),
+        )
+
+        if adapter_name == "QueueingAdapter":
+            lightning = QueueingLightningModule(**module_kwargs)
+        elif adapter_name == "ChannelAdapter":
+            lightning = ChannelLightningModule(**module_kwargs)
+        elif adapter_name == "MoEAdapter":
+            lightning = MoELightningModule(**module_kwargs)
+        elif adapter_name == "RoboticsAdapter":
+            lightning = RoboticsLightningModule(**module_kwargs)
+        else:
+            lightning = QueueingLightningModule(**module_kwargs)
         logger = instantiate(cfg.logger, save_dir=str(paths.logs)) if "logger" in cfg else False
         callbacks = [instantiate(cb) for cb in cfg.get("callbacks", {}).values()]
 
