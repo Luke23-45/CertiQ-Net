@@ -9,3 +9,7 @@ trainer:
   log_every_n_steps: 1
   lr: 0.0003
   weight_decay: 0.00001
+  use_ppo: false
+  ppo_clip_epsilon: 0.2
+  ppo_epochs: 4
+  ppo_batch_size: 64

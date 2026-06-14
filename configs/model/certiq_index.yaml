@@ -5,3 +5,4 @@ model:
   tau: 1.0
   C: 20.0
   beta: 1.0
+  # cost_fn: sed      # supported: sed, qmd (default: sed)

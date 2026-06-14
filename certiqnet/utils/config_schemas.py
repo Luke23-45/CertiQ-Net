@@ -46,6 +46,10 @@ class TrainerConfig:
     policy_mix_fraction: float = 0.25
     teacher_mix_fraction: float = 0.25
     synthetic_mix_fraction: float = 0.50
+    use_ppo: bool = False
+    ppo_clip_epsilon: float = 0.2
+    ppo_epochs: int = 4
+    ppo_batch_size: int = 64
 
 
 @dataclass

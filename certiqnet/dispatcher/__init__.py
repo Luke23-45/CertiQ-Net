@@ -1,5 +1,12 @@
 """CertiQ index architecture."""
 
+from certiqnet.dispatcher.certificate import (
+    DifferentiableKLProjection,
+    arrival_coordinate,
+    kl_project_linear,
+    normalize_policy,
+    policy_entropy,
+)
 from certiqnet.dispatcher.delay_geometry import (
     delay_arrival_coordinate,
     delay_envelope,
@@ -22,11 +29,16 @@ __all__ = [
     "CertiQIndexModel",
     "DispatcherDiagnostics",
     "DispatcherForward",
+    "DifferentiableKLProjection",
     "DispatchInteractionEncoder",
     "MarginalIndexHead",
     "index_token_features",
+    "arrival_coordinate",
     "delay_arrival_coordinate",
     "delay_envelope",
+    "kl_project_linear",
+    "normalize_policy",
+    "policy_entropy",
     "quadratic_drift_index",
     "sed_hard_policy",
     "sed_index",
