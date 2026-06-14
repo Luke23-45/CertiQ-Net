@@ -267,6 +267,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 kl_loss_dynamic = self.loss_fn.policy_kl(out_eval.pi, out_eval.p_cert)
                 self.epoch_kl_records.append(kl_loss_dynamic.detach().cpu().item())
 
+                epoch = int(getattr(self.trainer, "current_epoch", 0))
                 is_actor_active = (epoch >= self.imitation_warmup_epochs + self.critic_bootstrap_epochs)
                 effective_actor_weight = self.loss_fn.rollout_weight if is_actor_active else 0.0
 
@@ -321,6 +322,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             }
             
             self.epoch_kl_records.append(kl_loss.detach().cpu().item())
+            epoch = int(getattr(self.trainer, "current_epoch", 0))
             is_actor_active = (epoch >= self.imitation_warmup_epochs + self.critic_bootstrap_epochs)
             effective_actor_weight = self.loss_fn.rollout_weight if is_actor_active else 0.0
 
