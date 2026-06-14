@@ -280,7 +280,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                     + self.loss_fn.omega_usage * usage_loss
                     + self.loss_fn.omega_certificate * certificate_loss
                     + self.loss_fn.omega_correction * correction_loss
-                    + self.current_kl_weight * kl_loss_dynamic
+                    + supervised_weight * self.current_kl_weight * kl_loss_dynamic
                     - entropy_weight * entropy_loss
                 )
                 self.manual_backward(total_loss)
@@ -335,7 +335,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 + self.loss_fn.omega_usage * usage_loss
                 + self.loss_fn.omega_certificate * certificate_loss
                 + self.loss_fn.omega_correction * correction_loss
-                + self.current_kl_weight * kl_loss
+                + supervised_weight * self.current_kl_weight * kl_loss
                 - entropy_weight * entropy_loss
             )
 
