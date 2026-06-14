@@ -28,8 +28,8 @@ from certiqnet.experiments.logging import BufferedExperimentLogger as Experiment
 from certiqnet.experiments.metrics import aggregate_metrics, save_metrics
 from certiqnet.experiments.paths import RunPaths, slugify
 from certiqnet.experiments.runner import experiment_name_from_cfg, prepare_run
-from certiqnet.training.datamodule import CertiQNetDataModule
-from certiqnet.training.lightning_module import CertiQNetLightningModule
+from certiqnet.data.synthetic.datamodule import CertiQNetDataModule
+from certiqnet.train.common.module import BaseCertiQLightningModule as CertiQNetLightningModule
 from certiqnet.utils.platform import detect_platform, resolve_trainer_config
 from certiqnet.utils.progress import configure_progress
 

@@ -36,6 +36,9 @@ dev = [
     "mypy>=1.10.0",
 ]
 
+[project.scripts]
+certiqnet-train = "certiqnet.cli:main"
+
 [tool.setuptools.packages.find]
 include = ["certiqnet*"]
 

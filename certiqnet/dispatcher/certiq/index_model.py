@@ -6,14 +6,14 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from certiqnet.dispatcher.certificate import (
+from certiqnet.dispatcher.certiq.certificate import (
     DifferentiableKLProjection,
     arrival_coordinate,
     normalize_policy,
     policy_entropy,
 )
 from certiqnet.dispatcher.delay_geometry import sed_index
-from certiqnet.dispatcher.interaction import DispatchInteractionEncoder, index_token_features
+from certiqnet.dispatcher.certiq.interaction import DispatchInteractionEncoder, index_token_features
 from certiqnet.dispatcher.types import DispatcherDiagnostics, DispatcherForward
 
 

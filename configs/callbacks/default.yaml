@@ -1,4 +1,4 @@
 # @package _global_
 callbacks:
   audit:
-    _target_: certiqnet.training.callbacks.CertificateAuditCallback
+    _target_: certiqnet.train.common.callbacks.CertificateAuditCallback

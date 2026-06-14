@@ -17,9 +17,9 @@ from torch.distributions import Categorical
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from certiqnet.dispatcher.certificate import DifferentiableKLProjection
+from certiqnet.dispatcher.certiq.certificate import DifferentiableKLProjection
 from certiqnet.experiments.factory import build_model, build_mu
-from certiqnet.training.loss import CertiQNetLoss
+from certiqnet.train.common.loss import CertiQNetLoss
 
 
 def _check_projection_gradients():
@@ -106,7 +106,7 @@ def _check_full_model_gradients():
     cfg = OmegaConf.create(
         {
             "model": {
-                "_target_": "certiqnet.dispatcher.index_model.CertiQIndexModel",
+                "_target_": "certiqnet.dispatcher.certiq.index_model.CertiQIndexModel",
                 "hidden_dim": 64,
                 "tau": 1.0,
                 "C": 20.0,
@@ -135,7 +135,18 @@ def _check_full_model_gradients():
     N = 10
     mu, _ = build_mu(cfg)
     model = build_model(cfg, N=N, d_xi=0)
-    loss_fn = CertiQNetLoss(cfg.loss)
+    loss_fn = CertiQNetLoss(
+        omega_bc=float(cfg.loss.omega_bc),
+        omega_action=float(cfg.loss.get("omega_action", 1.5)),
+        omega_margin=float(cfg.loss.get("omega_margin", 0.1)),
+        omega_usage=float(cfg.loss.omega_usage),
+        omega_certificate=float(cfg.loss.omega_certificate),
+        omega_correction=float(cfg.loss.omega_correction),
+        rollout_weight=float(cfg.loss.rollout_weight),
+        policy_kl_weight=float(cfg.loss.policy_kl_weight),
+        value_weight=float(cfg.loss.value_weight),
+        entropy_weight=float(cfg.loss.entropy_weight),
+    )
     Q = torch.randint(0, 100, (16, N)).float()
     mu_b = mu.unsqueeze(0).expand(Q.shape[0], -1)
 

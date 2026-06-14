@@ -1,12 +1,5 @@
-"""CertiQ index architecture."""
+"""Dispatcher infrastructure — heuristics, types, and the CertiQ index architecture."""
 
-from certiqnet.dispatcher.certificate import (
-    DifferentiableKLProjection,
-    arrival_coordinate,
-    kl_project_linear,
-    normalize_policy,
-    policy_entropy,
-)
 from certiqnet.dispatcher.delay_geometry import (
     delay_arrival_coordinate,
     delay_envelope,
@@ -15,14 +8,21 @@ from certiqnet.dispatcher.delay_geometry import (
     sed_index,
     sed_soft_policy,
 )
-from certiqnet.dispatcher.interaction import (
-    DispatchInteractionEncoder,
-    index_token_features,
-)
-from certiqnet.dispatcher.index_model import CertiQIndexModel, MarginalIndexHead
 from certiqnet.dispatcher.types import (
     DispatcherDiagnostics,
     DispatcherForward,
+)
+from certiqnet.dispatcher.certiq import (
+    CertiQIndexModel,
+    DifferentiableKLProjection,
+    DispatchInteractionEncoder,
+    MarginalIndexHead,
+    CertifiedGeometry,
+    index_token_features,
+    arrival_coordinate,
+    kl_project_linear,
+    normalize_policy,
+    policy_entropy,
 )
 
 __all__ = [
@@ -32,6 +32,7 @@ __all__ = [
     "DifferentiableKLProjection",
     "DispatchInteractionEncoder",
     "MarginalIndexHead",
+    "CertifiedGeometry",
     "index_token_features",
     "arrival_coordinate",
     "delay_arrival_coordinate",

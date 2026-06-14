@@ -1,13 +1,20 @@
-"""Shared config-to-model helpers for experiment entrypoints."""
+"""Shared config-to-model helpers for experiment entrypoints.
+
+.. deprecated::
+    Prefer ``LightningCLI`` with ``class_path`` resolution (see
+    ``certiqnet.cli``).  This manual registry is retained only for
+    backward compatibility.
+"""
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, TypeVar
 
 import torch
 from omegaconf import DictConfig, OmegaConf
 
-from certiqnet.dispatcher.index_model import CertiQIndexModel
+from certiqnet.dispatcher.certiq.index_model import CertiQIndexModel
 from certiqnet.models.baselines import (
     AnalyticBackbonePolicy,
     JoinShortestWeightedQueue,
@@ -24,7 +31,13 @@ T = TypeVar("T")
 
 
 def build_mu(cfg: DictConfig) -> tuple[torch.Tensor, float]:
-    """Build the service-rate vector and arrival rate from the resolved config."""
+    """Build the service-rate vector and arrival rate from the resolved config.
+    
+    .. deprecated::
+        Pass ``mu`` and ``lam`` directly to data module / lightning module
+        constructor arguments instead.
+    """
+    warnings.warn("factory.build_mu is deprecated; pass mu/lam as direct args.", DeprecationWarning, stacklevel=2)
     env = cfg.env
     if env.mu_mode == "fixed":
         if env.mu_fixed is None:
@@ -43,7 +56,13 @@ def build_mu(cfg: DictConfig) -> tuple[torch.Tensor, float]:
 
 
 def build_model(cfg: DictConfig, N: int, d_xi: int = 0) -> torch.nn.Module:
-    """Instantiate the configured model class from the OmegaConf node."""
+    """Instantiate the configured model class from the OmegaConf node.
+    
+    .. deprecated::
+        Use ``class_path`` resolution via ``LightningCLI`` (``certiqnet.cli``)
+        instead of this manual if-elif chain.
+    """
+    warnings.warn("factory.build_model is deprecated; use class_path resolution instead.", DeprecationWarning, stacklevel=2)
     model_data = OmegaConf.to_container(cfg.model, resolve=True)
     if not isinstance(model_data, dict):
         raise TypeError("cfg.model must resolve to a mapping")
