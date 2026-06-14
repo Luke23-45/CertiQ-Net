@@ -50,6 +50,7 @@ class TrainerConfig:
     ppo_clip_epsilon: float = 0.2
     ppo_epochs: int = 4
     ppo_batch_size: int = 64
+    ppo_manual_clip_val: float = 1.0
 
 
 @dataclass

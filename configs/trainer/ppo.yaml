@@ -4,7 +4,7 @@ trainer:
   accelerator: auto
   devices: 1
   precision: bf16-mixed
-  gradient_clip_val: 1.0
+  gradient_clip_val: 0.0
   val_check_interval: 0.25
   log_every_n_steps: 10
   lr: 0.0003
@@ -20,3 +20,4 @@ trainer:
   ppo_clip_epsilon: 0.2
   ppo_epochs: 4
   ppo_batch_size: 64
+  ppo_manual_clip_val: 1.0

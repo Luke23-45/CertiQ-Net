@@ -60,6 +60,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         self.ppo_clip_epsilon = float(getattr(cfg.trainer, "ppo_clip_epsilon", 0.2))
         if self.use_ppo:
             self.automatic_optimization = False
+            self._gradient_clip_val = float(getattr(cfg.trainer, "ppo_manual_clip_val", 1.0))
         if hasattr(self, "save_hyperparameters"):
             self.save_hyperparameters(ignore=["model"])
 
@@ -259,9 +260,8 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
                     - entropy_weight * entropy_loss
                 )
                 self.manual_backward(total_loss)
-                clip_val = float(getattr(self.cfg.trainer, "gradient_clip_val", 1.0))
-                if clip_val > 0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_val)
+                if self._gradient_clip_val > 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self._gradient_clip_val)
                 opt.step()
 
             self.log("actor", actor_loss, on_step=True, on_epoch=True)

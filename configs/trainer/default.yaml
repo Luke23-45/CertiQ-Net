@@ -20,3 +20,4 @@ trainer:
   ppo_clip_epsilon: 0.2
   ppo_epochs: 4
   ppo_batch_size: 64
+  ppo_manual_clip_val: 1.0
