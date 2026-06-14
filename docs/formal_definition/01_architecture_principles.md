@@ -16,13 +16,9 @@ only if it has a clear role in at least one of:
 4. enforcing a certificate before dispatch,
 5. exposing diagnostics that can be audited.
 
-The current codebase implements two certified dispatcher families:
+The current codebase implements one certified dispatcher model:
 
-1. `CertiQDispatcher`
-   - legacy reflected-pressure architecture,
-   - analytic base geometry,
-   - scalar usage cap or fallback certification.
-2. `CertiQIndexModel`
+1. `CertiQIndexModel`
    - learned marginal-cost index architecture,
    - SED/QMD-aligned geometry,
    - exact KL projection onto a fixed QMD budget,
@@ -68,19 +64,15 @@ d_i^{SED}(Q,\mu)=\frac{Q_i+1}{\mu_i},
 d_i^{QMD}(Q,\mu)=\frac{2Q_i+1}{\mu_i}.
 \]
 
-`CertiQDispatcher` uses the capacity-normalized workload geometry
-\(y_i^\beta(Q)\) as its certificate coordinate. `CertiQIndexModel` uses the
-quadratic drift geometry \(d_i^{QMD}\) as the fixed backbone for the learned
-index. `SED` remains a comparison baseline, but it is not the tail policy for
-the canonical index model.
+`CertiQIndexModel` uses the quadratic drift geometry \(d_i^{QMD}\) as the fixed
+backbone for the learned index. `SED` remains a comparison baseline, but it is
+not the tail policy for the canonical index model.
 
 ### 3.2 Proposal Layer
 
 The proposal layer learns performance corrections. It may use context
-\(\xi\), resource-local features, pooled set summaries, or reflected pressure.
-In the current implementation the legacy dispatcher uses a permutation-equivariant
-proposal module, while the index model learns a marginal-cost residual on top of
-the quadratic drift index.
+\(\xi\), resource-local features, or pooled set summaries. The index model
+learns a marginal-cost residual on top of the quadratic drift index.
 
 The proposal layer is not the source of certification. It is the source of
 adaptivity and performance.

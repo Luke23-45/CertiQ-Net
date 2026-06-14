@@ -17,9 +17,6 @@ def collect_grouped_results(root: Path) -> dict[str, list[dict[str, Any]]]:
     """Collect results grouped by experiment family based on manifest.json."""
     grouped_rows: dict[str, list[dict[str, Any]]] = {
         "main_queueing": [],
-        "ablations": [],
-        "cross_domain": [],
-        "certificate_validation": [],
         "legacy": []
     }
     

@@ -45,7 +45,7 @@ def _validate_exact_certificate_constant(model: torch.nn.Module, *, context: str
     if not math.isfinite(constant) or constant < 0:
         raise ValueError(
             f"Exact queueing {context} require a finite model.C. "
-            "Update the CertiQ Dispatcher model config to provide a finite geometry.C."
+            "Update the CertiQ Index model config to provide a finite C."
         )
     return constant
 

@@ -1,9 +1,0 @@
-defaults:
-  - /model: certiq_dispatcher
-  - /env: family_e
-  - /adapter: queueing
-  - /trainer: default
-  - /logger: wandb
-  - /callbacks: certificate_audit
-  - /progress: default
-

@@ -3,21 +3,9 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from certiqnet.dispatcher.config import (
-    CertiQDispatcherConfig,
-    CertificateConfig,
-    GeometryConfig,
-    PressureConfig,
-    ProposalConfig,
-)
 from omegaconf import MISSING
 
 __all__ = [
-    "CertiQDispatcherConfig",
-    "CertificateConfig",
-    "GeometryConfig",
-    "PressureConfig",
-    "ProposalConfig",
     "EnvConfig",
     "TrainerConfig",
     "LossConfig",

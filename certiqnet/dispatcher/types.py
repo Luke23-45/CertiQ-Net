@@ -1,11 +1,8 @@
 """Typed public objects for the z3 CertiQ Dispatcher."""
 
 from dataclasses import dataclass
-from typing import Literal
 
 from torch import Tensor
-
-CertificateMode = Literal["projection", "fallback", "uncertified"]
 
 
 @dataclass(frozen=True)

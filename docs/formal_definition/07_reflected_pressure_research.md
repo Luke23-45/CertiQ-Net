@@ -1,7 +1,7 @@
 # Reflected Pressure Research Note
 
-This note compares the legacy CertiQ reflected-pressure dispatcher with the
-Reflected MoE formal math package at:
+This note compares the deprecated reflected-pressure dispatcher architecture
+with the Reflected MoE formal math package at:
 
 ```text
 C:\Users\Hellx\Documents\Programming\python\Project\Neryva\moe_route\docs\formal_math
@@ -10,9 +10,9 @@ C:\Users\Hellx\Documents\Programming\python\Project\Neryva\moe_route\docs\formal
 The comparison is architectural. It does not claim that MoE routing theorems
 directly prove queueing-dispatch stability.
 
-The reflected-pressure idea is used only by the legacy `CertiQDispatcher`
-path: pressure enters the learned proposal, is updated between rollout steps,
-and leaves the certificate boundary unchanged. The newer `CertiQIndexModel`
+The reflected-pressure idea was used by the deprecated `CertiQDispatcher`
+path: pressure entered the learned proposal, was updated between rollout steps,
+and left the certificate boundary unchanged. The `CertiQIndexModel`
 does not use this pressure state in its forward path.
 
 ## 1. What Neryva Formalizes

@@ -1,4 +1,4 @@
-"""Diagnose a z3 CertiQ Dispatcher queueing run."""
+"""Diagnose a z3 CertiQ Index queueing run."""
 
 from __future__ import annotations
 

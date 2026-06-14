@@ -112,8 +112,8 @@ d_i^{QMD}(Q,\mu)=\frac{2Q_i+1}{\mu_i}.
 \]
 
 These indices define the SED and quadratic-min-drift baselines, and they also
-anchor the learned index model. They are not the same as the legacy analytic
-geometry used by `CertiQDispatcher`.
+anchor the learned index model. The index model learns a residual correction
+on top of the quadratic drift index.
 
 ## 7. Adapter Contract
 

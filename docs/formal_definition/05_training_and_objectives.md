@@ -65,10 +65,8 @@ Soft or hard SED targets remain comparison baselines. The heuristic labels are
 available at inference time and can be used for supervised warm-starting, but
 the default training recipe should not depend on any separate expert dataset.
 
-The legacy dispatcher also uses an internal pressure state during training and
-evaluation. That pressure state is a nonnegative controller memory that shifts
-proposal logits away from repeatedly preferred resources while leaving the
-certificate boundary unchanged.
+The index model does not use an internal pressure state. The proposal is
+stateless across rollout steps.
 
 ## 5. Evaluation
 

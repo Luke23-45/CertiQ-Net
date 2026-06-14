@@ -172,57 +172,6 @@ class DispatchInteractionEncoder(nn.Module):
         return x, global_emb
 
 
-def legacy_token_features(
-    Q: Tensor,
-    mu: Tensor,
-    y: Tensor,
-    pressure: Tensor,
-    u_cert: Tensor,
-    xi: Tensor | None = None,
-    d_xi: int = 0,
-) -> tuple[Tensor, Tensor]:
-    """Return token and global features for the legacy dispatcher."""
-    mu_safe = mu.clamp_min(torch.finfo(mu.dtype).tiny)
-    qmd = (2.0 * Q + 1.0) / mu_safe
-    token_parts = [
-        Q.unsqueeze(-1),
-        mu.unsqueeze(-1),
-        torch.log1p(Q).unsqueeze(-1),
-        torch.log(mu_safe).unsqueeze(-1),
-        (Q / mu_safe).unsqueeze(-1),
-        qmd.unsqueeze(-1),
-        y.unsqueeze(-1),
-        pressure.unsqueeze(-1),
-        torch.log1p(pressure.clamp_min(0.0)).unsqueeze(-1),
-        u_cert.unsqueeze(-1),
-    ]
-    if xi is not None:
-        assert d_xi > 0, "xi was provided but the model was built without context features."
-        assert xi.shape[:2] == Q.shape, "xi must match Q batch and resource dimensions."
-        if d_xi > 0:
-            assert xi.shape[-1] == d_xi, "xi feature width must match d_xi."
-        token_parts.append(xi)
-    elif d_xi > 0:
-        token_parts.append(torch.zeros(Q.shape[0], Q.shape[1], d_xi, device=Q.device, dtype=Q.dtype))
-    token_features = torch.cat(token_parts, dim=-1)
-    global_features = torch.cat(
-        [
-            Q.mean(dim=-1, keepdim=True),
-            Q.amax(dim=-1, keepdim=True),
-            mu_safe.mean(dim=-1, keepdim=True),
-            mu_safe.amin(dim=-1, keepdim=True),
-            qmd.mean(dim=-1, keepdim=True),
-            qmd.amin(dim=-1, keepdim=True),
-            pressure.mean(dim=-1, keepdim=True),
-            pressure.amax(dim=-1, keepdim=True),
-            u_cert.mean(dim=-1, keepdim=True),
-            u_cert.amax(dim=-1, keepdim=True),
-        ],
-        dim=-1,
-    )
-    return token_features, global_features
-
-
 def index_token_features(
     Q: Tensor,
     mu: Tensor,

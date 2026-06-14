@@ -1,6 +1,6 @@
 # @package _global_
 project:
-  name: certiq-dispatcher-z3
+  name: certiq-index-z3
   seed: 42
   output_root: outputs
   experiment_name: null

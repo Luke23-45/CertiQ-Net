@@ -1,4 +1,4 @@
-"""Diagnose gradient flow through the z3 CertiQ Dispatcher."""
+"""Diagnose gradient flow through the z3 CertiQ Index model."""
 
 from __future__ import annotations
 
@@ -20,10 +20,11 @@ def main() -> None:
     cfg = OmegaConf.create(
         {
             "model": {
-                "_target_": "certiqnet.dispatcher.model.CertiQDispatcher",
-                "geometry": {"C": 5.0},
-                "proposal": {"pooling": "mean"},
-                "certificate": {"mode": "projection", "fallback_radius": 50.0},
+                "_target_": "certiqnet.dispatcher.index_model.CertiQIndexModel",
+                "hidden_dim": 128,
+                "tau": 1.0,
+                "C": 20.0,
+                "beta": 1.0,
             },
             "env": {
                 "N": 10,
@@ -68,7 +69,7 @@ def main() -> None:
     total = sum(losses.values())
     total.backward()
 
-    print("=== CertiQ Dispatcher Gradient Diagnostic ===")
+    print("=== CertiQ Index Gradient Diagnostic ===")
     print(f"policy entropy mean       : {out.diagnostics.policy_entropy.mean().item():.6f}")
     print(f"usage mean/open-rate      : {out.diagnostics.usage_final.mean().item():.6f} / {(out.diagnostics.usage_final > 0.1).float().mean().item():.6f}")
     print(f"certificate slack mean/min: {out.diagnostics.certificate_slack.mean().item():.6f} / {out.diagnostics.certificate_slack.min().item():.6f}")

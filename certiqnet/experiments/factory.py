@@ -2,15 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import fields, is_dataclass
 from typing import Any, TypeVar
 
 import torch
 from omegaconf import DictConfig, OmegaConf
 
-from certiqnet.dispatcher.config import CertiQDispatcherConfig
 from certiqnet.dispatcher.index_model import CertiQIndexModel
-from certiqnet.dispatcher.model import CertiQDispatcher
 from certiqnet.models.baselines import (
     AnalyticBackbonePolicy,
     JoinShortestWeightedQueue,
@@ -24,19 +21,6 @@ from certiqnet.models.baselines import (
 T = TypeVar("T")
 
 
-def _dataclass_from_dict(cls: type[T], data: dict[str, Any]) -> T:
-    """Construct nested dataclasses from a resolved config dictionary."""
-    kwargs: dict[str, Any] = {}
-    for f in fields(cls):  # type: ignore[arg-type]
-        if f.name not in data:
-            continue
-        value = data[f.name]
-        target = f.type
-        if is_dataclass(target) and isinstance(value, dict):
-            kwargs[f.name] = _dataclass_from_dict(target, value)  # type: ignore[arg-type]
-        else:
-            kwargs[f.name] = value
-    return cls(**kwargs)
 
 
 def build_mu(cfg: DictConfig) -> tuple[torch.Tensor, float]:
@@ -65,10 +49,6 @@ def build_model(cfg: DictConfig, N: int, d_xi: int = 0) -> torch.nn.Module:
         raise TypeError("cfg.model must resolve to a mapping")
 
     target = str(model_data.get("_target_", ""))
-    if target.endswith("CertiQDispatcher"):
-        return CertiQDispatcher(
-            _dataclass_from_dict(CertiQDispatcherConfig, model_data), N=N, d_xi=d_xi
-        )
     if target.endswith("AnalyticBackbonePolicy"):
         return AnalyticBackbonePolicy(
             N=N, beta=float(model_data.get("beta", 1.0)), C=float(model_data.get("C", float("inf")))
