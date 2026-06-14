@@ -102,10 +102,10 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
 
     def _entropy_weight(self) -> float:
         epoch = int(getattr(self.trainer, "current_epoch", 0))
-        if epoch >= self.entropy_warmup_epochs:
-            return 0.0
-        frac = 1.0 - (epoch / max(self.entropy_warmup_epochs, 1))
-        return self.entropy_weight * frac
+        rl_start = self.imitation_warmup_epochs + self.critic_bootstrap_epochs
+        if epoch < rl_start:
+            return 0.0  # Zero entropy during imitation + bootstrap
+        return self.entropy_weight  # Constant entropy during RL exploration
 
     def _imitation_weight(self) -> float:
         epoch = int(getattr(self.trainer, "current_epoch", 0))
