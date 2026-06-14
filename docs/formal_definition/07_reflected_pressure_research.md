@@ -1,289 +1,81 @@
-# Reflected Pressure Research Note
+# Reflected Pressure Supplement
 
-This note compares the deprecated reflected-pressure dispatcher architecture
-with the Reflected MoE formal math package at:
+This file records a supplementary reflected-pressure extension of the CertiQ
+proposal layer. It is not part of the canonical index model, but it is a
+formalized variant of the proposal-control mechanism.
 
-```text
-C:\Users\Hellx\Documents\Programming\python\Project\Neryva\moe_route\docs\formal_math
-```
+## 1. Pressure State
 
-The comparison is architectural. It does not claim that MoE routing theorems
-directly prove queueing-dispatch stability.
-
-The reflected-pressure idea was used by the deprecated `CertiQDispatcher`
-path: pressure entered the learned proposal, was updated between rollout steps,
-and left the certificate boundary unchanged. The `CertiQIndexModel`
-does not use this pressure state in its forward path.
-
-## 1. What Neryva Formalizes
-
-The Reflected MoE router is a load-aware expert-routing architecture. Its core
-score is:
+Let
 
 \[
-s_{t,e}=a_{t,e}+b_e-\gamma q_e.
+p\in\mathbb R_+^N
 \]
 
-Here:
+denote a nonnegative resource-pressure state.
 
-1. \(a_{t,e}\) is learned token-expert affinity,
-2. \(b_e\) is an expert bias,
-3. \(q_e\ge 0\) is a nonnegative expert pressure state,
-4. \(\gamma q_e\) penalizes experts that have accumulated excess load.
+The purpose of \(p\) is to encode recent over-selection or routing pressure
+separately from the physical backlog \(Q\).
 
-The pressure update is projected:
+## 2. Reflected Proposal
 
-\[
-q^+
-=
-\Pi_{\mathbb R_+^E}
-\left(
-(1-\delta)q+\eta(\hat m-\mu)
-\right).
-\]
-
-\(\hat m\) is routed feedback mass and \(\mu\) is the target expert load. The
-projection keeps pressure nonnegative. This makes load control an explicit
-router state, not only an auxiliary loss.
-
-The formal package separates three claim levels:
-
-1. implemented finite-batch routing facts,
-2. router-level pressure-control theory,
-3. end-to-end model framing without claiming full nonconvex training
-   convergence.
-
-That separation is stronger than many informal architecture descriptions and
-is directly useful for CertiQ.
-
-## 2. What Transfers To CertiQ
-
-The transferable idea is not sparse MoE routing. CertiQ is an online CTMC
-dispatch architecture, not a Transformer MoE layer.
-
-The transferable idea is the controller pattern:
-
-\[
-\text{affinity} + \text{bias} - \text{nonnegative pressure penalty}.
-\]
-
-For CertiQ, a reflected dispatch score takes the form:
-
-\[
-u_i^{\mathrm{ref}}
-=
-u_i^{\mathrm{cert}}
-+
-r_i^\Theta
--
-\rho \psi_i(p_i),
-\qquad
-p_i\ge 0.
-\]
-
-Here:
-
-1. \(u_i^{\mathrm{cert}}\) is the certified base geometry,
-2. \(r_i^\Theta\) is the learned proposal correction,
-3. \(p_i\) is a resource pressure state,
-4. \(\psi_i\) is a monotone pressure penalty,
-5. \(\rho>0\) controls how strongly pressure alters scores.
-
-This makes the legacy learned proposal load-aware across time, instead of only
-state-aware within one forward pass.
-
-## 3. Why This Could Improve the Legacy Dispatcher
-
-The legacy dispatcher uses:
-
-\[
-p_{\mathrm{prop}}
-=
-\operatorname{softmax}(u^{\mathrm{cert}}+r^\Theta)
-\]
-
-and then certifies the final mixture by projection or fallback. This is safe,
-but the proposal has no explicit memory of repeated over-selection except
-through the current queue vector \(Q\).
-
-A reflected pressure state adds a second control channel:
-
-1. \(Q_i\) represents physical backlog,
-2. \(p_i\) represents recent routing pressure or certificate pressure,
-3. projection still enforces the Lyapunov envelope.
-
-This matters because a resource can be attractive under instantaneous weighted
-queue geometry while still being overused by the learned proposal over recent
-rollout windows. Pressure gives the legacy architecture a direct way to suppress
-that overuse without relying on a large auxiliary balancing loss.
-
-## 4. Pressure-Aware Proposal
-
-The pressure-aware proposal operator is:
+Let \(u_i^{\mathrm{cert}}(Q,\mu)\) denote a certified base score and
+\(r_i^\Theta(Q,\mu,\xi)\) a learned residual correction. A pressure-aware
+proposal may be defined by
 
 \[
 \mathcal A_\Theta^{\mathrm{press}}(Q,\mu,\xi,p)
 =
-\operatorname{softmax}
-\left(
-u^{\mathrm{cert}}(Q,\mu)
-+
-r^\Theta(Q,\mu,\xi)
--
-\rho p
-\right).
+\operatorname{softmax}\!\left(
+u^{\mathrm{cert}}(Q,\mu)+r^\Theta(Q,\mu,\xi)-\rho p
+\right),
+\qquad \rho>0.
 \]
 
-The pressure update uses realized or expected dispatch mass:
+The pressure term acts as a monotone penalty on resources with large pressure.
+
+## 3. Reflected Update
+
+Let \(\eta_p>0\) and \(\delta\in[0,1]\). A reflected update may be defined by
 
 \[
-p_i^+
+p^+
 =
-\max
-\left(
-0,
-(1-\delta)p_i
-+
-\eta_p(\hat d_i-\bar d_i)
-\right).
+\Pi_{\mathbb R_+^N}\!\left((1-\delta)p+\eta_p(\hat d-\bar d)\right),
 \]
 
-Possible definitions:
+where \(\hat d\) denotes realized or expected dispatch mass and \(\bar d\) is a
+target mass vector, for example \(\bar d_i=\mu_i/\sum_j \mu_j\).
 
-1. \(\hat d_i=\pi_i^\Theta\), the final certified dispatch mass at the current
-   state,
-2. \(\bar d_i=\mu_i/\sum_j\mu_j\), the capacity-proportional target,
-3. \(\eta_p>0\), pressure step size,
-4. \(\delta\ge 0\), pressure decay.
+## 4. Certificate Interaction
 
-Using final certified dispatch mass instead of proposal mass controls the
-actual dispatched policy in the legacy path.
-
-## 5. Certificate Interaction
-
-The certificate operator must remain after pressure adjustment:
+The certificate operator remains unchanged:
 
 \[
 \pi^\Theta
 =
-\mathcal C_Q
-\left(
+\mathcal C_Q\!\left(
 \mathcal A_\Theta^{\mathrm{press}}(Q,\mu,\xi,p),
 \mathcal B(Q,\mu)
 \right).
 \]
 
-This ordering is important.
-
-Pressure may improve load behavior, but pressure is not itself the CTMC
-certificate. The legacy final policy must still satisfy:
+Pressure may influence the proposal, but it does not replace the certificate.
+Certification still requires
 
 \[
 A_{\pi^\Theta}(Q,\mu)\le B(Q,\mu).
 \]
 
-Therefore reflected pressure is a proposal-control mechanism. It is not a
-replacement for envelope projection or fallback.
+## 5. Preservation Statement
 
-## 6. Theorem Obligations
+If \(\mathcal C_Q\) returns an admissible policy for every proposal
+distribution in its domain, then replacing the proposal by a reflected-pressure
+proposal preserves certification.
 
-Before the pressure controller is treated as theorem-bearing architecture,
-these obligations must be separated:
+This statement isolates pressure as a proposal-level control mechanism.
 
-1. **Finite-step invariants**:
-   prove \(p_i\ge 0\), policy normalization, and certificate preservation after
-   projection.
-2. **Certificate inheritance**:
-   show that adding pressure before \(\mathcal C_Q\) cannot break the existing
-   projection or fallback theorem.
-3. **Pressure dynamics**:
-   analyze the idealized population update with fixed proposal parameters and
-   stationary state distribution.
-4. **No overclaim**:
-   do not claim global convergence of the learned neural policy or optimality
-   of the pressure controller.
+## 6. Supplementary Status
 
-The most defensible theorem is simple:
-
-> If the certificate operator returns an admissible policy for every proposal
-> distribution, then replacing the proposal with a reflected-pressure proposal
-> preserves certification.
-
-This theorem keeps pressure as an architecture component while leaving the
-legacy CTMC certificate boundary unchanged.
-
-## 7. What Does Not Transfer
-
-The following Neryva components do not directly transfer to CertiQ:
-
-1. token top-k expert selection,
-2. MoE sparse capacity admission,
-3. shared experts in the Transformer feed-forward layer,
-4. z-loss on raw language-model router logits,
-5. language-model transfer claims.
-
-They may inspire experiments, but they are not CertiQ architecture facts.
-
-## 8. Recommended Research Direction
-
-The implemented pressure architecture is:
-
-**CertiQ Dispatcher with Reflected Pressure Proposal**
-
-\[
-\boxed{
-\pi^\Theta(Q,\mu,\xi,p)
-=
-\mathcal C_Q
-\left(
-\operatorname{softmax}
-\left[
-u^{\mathrm{cert}}
-+
-r^\Theta
--
-\rho p
-\right],
-\mathcal B(Q,\mu)
-\right)
-}
-\]
-
-with projected pressure update:
-
-\[
-p^+
-=
-\Pi_{\mathbb R_+^N}
-\left(
-(1-\delta)p+\eta_p(\pi^\Theta-\mu/\Lambda)
-\right).
-\]
-
-This gives every component a role:
-
-1. certified base geometry gives a stable reference,
-2. neural residual gives performance adaptation,
-3. reflected pressure gives temporal load control,
-4. certificate projection gives hard admissibility,
-5. diagnostics expose both certificate slack and pressure behavior.
-
-This is the implemented pressure-aware extension of the legacy CertiQ
-dispatcher.
-
-## 9. External Research Context
-
-The Neryva formal package is consistent with the MoE literature direction:
-
-1. Shazeer et al. introduced sparse-gated MoE routing.
-2. GShard and Switch Transformer made sparse token-choice routing practical at
-   large Transformer scale.
-3. ST-MoE emphasized router stabilization, including z-loss.
-4. Expert Choice routing changed assignment direction by letting experts choose
-   token buckets.
-5. Soft MoE replaced hard dispatch with soft token mixtures.
-6. Auxiliary-loss-free balancing and DeepSeek-style bias adjustment move load
-   control away from large auxiliary balancing gradients.
-
-For CertiQ, the strongest inspiration is the last point: load control should be
-part of the routing mechanism, not merely a loss term.
+This extension is supplementary. The canonical index model defined in the
+preceding chapters does not require a pressure state in its forward path.

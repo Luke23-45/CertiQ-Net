@@ -1,124 +1,65 @@
 # Architecture Principles
 
-## 1. Design Target
+## 1. Dispatch Primitive
 
-CertiQ is designed for one primitive:
+CertiQ models online assignment of arriving work to heterogeneous resources.
+The primitive is a map from state to a distribution over resources, together
+with an explicit certificate that constrains the resulting distribution.
 
-> assign one arriving unit of work to one heterogeneous resource online while
-> preserving an auditable certificate.
-
-Every implemented component must support that primitive. A component is valid
-only if it has a clear role in at least one of:
-
-1. representing the unordered resource set,
-2. comparing backlog against service capacity,
-3. proposing a performance-improving dispatch policy,
-4. enforcing a certificate before dispatch,
-5. exposing diagnostics that can be audited.
-
-The current codebase implements one certified dispatcher model:
-
-1. `CertiQIndexModel`
-   - learned marginal-cost index architecture,
-   - SED/QMD-aligned geometry,
-   - exact KL projection onto a fixed QMD budget,
-   - no reflected pressure in the forward path.
-
-## 2. Architectural Discipline
-
-The relevant architectural lesson is compression: define a small number of
-operations that directly match the dispatch primitive, then reuse them
-consistently.
-
-For CertiQ, the central operation is:
+The canonical structure is
 
 \[
-\text{certified assignment}
-=
-\text{proposal}
-\quad\text{filtered through}\quad
-\text{state-dependent admissibility}.
+\text{dispatch} = \text{proposal} \;\; \text{followed by} \;\; \text{certification}.
 \]
 
-Each block must answer four questions:
+## 2. Architectural Decomposition
 
-1. What mathematical object does this block produce?
-2. What invariance or constraint does it preserve?
-3. What failure mode does it prevent?
-4. What diagnostic verifies correct behavior?
+The architecture is decomposed into three mathematical layers.
 
-## 3. Three-Layer Architecture
+### 2.1 Geometry Layer
 
-The implemented system separates into three layers.
+The geometry layer maps state and capacity into resourcewise indices or costs.
+Its role is to define the admissibility and comparison scale used by the
+certificate.
 
-### 3.1 Geometry Layer
+### 2.2 Proposal Layer
 
-The geometry layer maps queue state and capacity into a dispatch energy. The
-project currently exposes three related geometries:
+The proposal layer produces a probability distribution over resources from the
+observed state. It may depend on queue lengths, service rates, and resource
+context.
+
+### 2.3 Certificate Layer
+
+The certificate layer maps a proposal into an admissible distribution. It is
+part of the policy definition and not a post hoc regularizer.
+
+## 3. Symmetry Requirement
+
+Resource labels are not semantically meaningful. If \(\sigma\) is a permutation
+of \(\{1,\dots,N\}\), the policy must satisfy
 
 \[
-y_i^{\beta}(Q)=Q_i/\mu_i^\beta,
-\qquad
-d_i^{SED}(Q,\mu)=\frac{Q_i+1}{\mu_i},
-\qquad
-d_i^{QMD}(Q,\mu)=\frac{2Q_i+1}{\mu_i}.
+\pi(\sigma x)=\sigma\pi(x).
 \]
 
-`CertiQIndexModel` uses the quadratic drift geometry \(d_i^{QMD}\) as the fixed
-backbone for the learned index. `SED` remains a comparison baseline, but it is
-not the tail policy for the canonical index model.
+This requirement applies to the proposal map, the certificate map, and any
+intermediate summary that is reused across resources.
 
-### 3.2 Proposal Layer
+## 4. Certificate Boundary
 
-The proposal layer learns performance corrections. It may use context
-\(\xi\), resource-local features, or pooled set summaries. The index model
-learns a marginal-cost residual on top of the quadratic drift index.
+The final policy is the certified policy. A model is not certified merely
+because its proposal is well trained or its loss is small.
 
-The proposal layer is not the source of certification. It is the source of
-adaptivity and performance.
+The certificate boundary must therefore be explicit, state dependent, and
+auditable.
 
-### 3.3 Certificate Layer
+## 5. Acceptable Model Form
 
-The certificate layer maps a proposal into a certified final distribution.
-This is where the architecture earns the name CertiQ. If the final policy
-violates the certificate, the architecture has failed, even if training loss
-improves.
-
-## 4. Required Invariances
-
-Resource labels have no intrinsic meaning. The architecture must be
-permutation equivariant:
+An acceptable CertiQ model has the form
 
 \[
-\pi(\sigma Q,\sigma\mu,\sigma\xi)=\sigma\pi(Q,\mu,\xi).
+\pi^\Theta(x)=\mathcal C_x\!\left(\mathcal A_\Theta(x),\mathcal B(x)\right),
 \]
 
-This requirement affects all blocks:
-
-1. local feature maps must be shared across resources,
-2. global summaries must be permutation invariant,
-3. resource scores must be produced equivariantly,
-4. the certificate operator must commute with resource permutation,
-5. diagnostics must reorder consistently with the state.
-
-## 5. First-Class Certificate Boundary
-
-Certification is not a training regularizer.
-
-The final action distribution must satisfy the certificate at inference time by
-construction. A drift penalty may help training, but it cannot substitute for
-projection, fallback, or another exact certificate operator.
-
-## 6. What Makes The Design Acceptable
-
-An acceptable CertiQ architecture should have:
-
-1. one canonical forward equation,
-2. one resource-set interface,
-3. one diagnostics object,
-4. one proposal operator,
-5. one certificate boundary,
-6. theorem claims stated only at the certificate boundary.
-
-The implementation may expose multiple certified modes, but they must all be
-explicitly named and auditable.
+where \(\mathcal A_\Theta\) is a learned proposal, \(\mathcal B\) is a fixed
+geometry or budget map, and \(\mathcal C_x\) is the certificate operator.

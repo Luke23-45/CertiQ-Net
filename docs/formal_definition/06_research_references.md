@@ -1,153 +1,97 @@
 # Research References
 
-This file records sources that inform the implemented CertiQ dispatcher
-family. It separates external research support from CertiQ-specific theorem
-claims.
+This file records external and project-local sources that support the formal
+definitions in this directory.
 
-## 1. Transformer Architecture Discipline
+## 1. Set Processing And Permutation Symmetry
 
-Source:
+Relevant sources:
 
-- Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones,
-  Aidan N. Gomez, Lukasz Kaiser, and Illia Polosukhin, "Attention Is All You
-  Need," 2017.
-- Verified page: https://arxiv.org/abs/1706.03762
+- Ashish Vaswani et al., "Attention Is All You Need," 2017.
+- Manzil Zaheer et al., "Deep Sets," NeurIPS 2017.
+- Juho Lee et al., "Set Transformer," ICML 2019.
 
-What it supports:
+Supported use:
 
-The paper supports the design lesson that a strong architecture can be organized
-around a small reusable primitive. For CertiQ, that lesson informs the shared
-proposal/certificate separation.
+These works motivate shared local maps, invariant aggregation, and
+equivariant set processing.
 
-What it does not support:
+Unsupported use:
 
-It does not support any queueing stability theorem, Lyapunov certificate, or
-dispatch guarantee for CertiQ.
+They do not prove queueing stability, certificate validity, or any CertiQ
+dispatch guarantee.
 
-## 2. Permutation-Invariant Set Processing
+## 2. Queueing Stability Language
 
-Source:
+Relevant sources:
 
-- Manzil Zaheer, Satwik Kottur, Siamak Ravanbakhsh, Barnabas Poczos, Ruslan
-  Salakhutdinov, and Alexander Smola, "Deep Sets," NeurIPS 2017.
-- Verified page: https://papers.nips.cc/paper/6931-deep-sets
-- Preprint: https://arxiv.org/abs/1703.06114
-
-What it supports:
-
-This source supports using shared local maps and invariant aggregation when the
-input is an unordered set. It is directly relevant to resource-label symmetry.
-
-What it does not support:
-
-It does not prove queueing stability or certify learned dispatch policies.
-
-## 3. Attention Over Sets
-
-Source:
-
-- Juho Lee, Yoonho Lee, Jungtaek Kim, Adam Kosiorek, Seungjin Choi, and Yee
-  Whye Teh, "Set Transformer: A Framework for Attention-based
-  Permutation-Invariant Neural Networks," ICML 2019.
-- Verified page: https://proceedings.mlr.press/v97/lee19d.html
-- Preprint: https://arxiv.org/abs/1810.00825
-
-What it supports:
-
-This source supports attention-based encoders for unordered resource sets.
-It is useful for the legacy reflected-pressure proposal module.
-
-What it does not support:
-
-It does not justify a Lyapunov drift envelope or a CTMC stability claim.
-
-## 4. Foster-Lyapunov Stability Language
-
-Source:
-
-- Sean P. Meyn and Richard L. Tweedie, Markov Chains and Stochastic Stability.
-- Verified page: https://probability.ca/MT/
-- Publisher metadata: https://www.cambridge.org/core/books/markov-chains-and-stochastic-stability/8E7E6C0907EDE33B9E25A5F6C8A3D0F0
-
-What it supports:
-
-This source supports standard Foster-Lyapunov recurrence language after a drift
-inequality has already been proved.
-
-What it does not support:
-
-It does not prove the CertiQ base envelope, the legacy certificate layer, or
-the index-model projection operator.
-
-## 5. Queueing Stability And MaxWeight Context
-
-Source:
-
+- Sean P. Meyn and Richard L. Tweedie, *Markov Chains and Stochastic Stability*.
 - Leandros Tassiulas and Anthony Ephremides, "Stability Properties of
   Constrained Queueing Systems and Scheduling Policies for Maximum Throughput
-  in Multihop Radio Networks," IEEE Transactions on Automatic Control, 1992.
-- Verified technical report page: https://drum.lib.umd.edu/items/571fda52-aefb-4497-9a2d-69d8c7c907b9
-- DOI record: https://doi.org/10.1109/9.182479
+  in Multihop Radio Networks," 1992.
 
-What it supports:
+Supported use:
 
-This source supports the broader queueing-control principle that stability can
-be designed through queue-aware scheduling and Lyapunov-style reasoning.
+These works provide the standard language for drift, recurrence, and
+queue-aware scheduling.
 
-What it does not support:
+Unsupported use:
 
-It does not prove the CertiQ dispatcher family, the exact z2 backbone
-constant, or the KL-projected index model.
+They do not by themselves prove the CertiQ index model or its KL projection.
 
-## 6. Shortest-Delay Routing And Heterogeneous Servers
+## 3. Delay Geometry
 
-Sources:
+Relevant sources:
 
-- A shortest-expected-delay routing result for heterogeneous queues.
-- A heterogeneous-server routing paper that compares JSQ-style and SED-style
-  rules.
+- Classical shortest-expected-delay routing results for heterogeneous queues.
+- Comparative heterogeneous-server routing literature using SED-style rules.
 
-What it supports:
+Supported use:
 
-These sources justify the inclusion of SED and quadratic-min-drift baselines.
-They also justify treating heterogeneous service rates as part of the routing
-geometry rather than as a cosmetic parameter.
+These sources justify SED and QMD as comparison geometries.
 
-What it does not support:
+Unsupported use:
 
-They do not prove that the learned model beats every classical routing rule.
+They do not establish optimality of the learned proposal.
 
-## 7. Exact Projection As An Implemented Operator
+## 4. Exact Projection
 
-The KL projection used by `CertiQIndexModel` is an exact convex-optimization
-operator implemented in code. It is an implementation fact, not a project-local
-stability theorem.
+The KL projection in the CertiQ index model is a state-dependent convex
+optimization operator. It supplies a clean certificate boundary, but it does
+not itself imply positive recurrence or optimality.
 
-What it supports:
+## 5. Differentiable Convex Optimization Layers
 
-It supports a clean certificate boundary for the index model.
+Relevant sources:
 
-What it does not support:
+- Brandon Amos and J. Zico Kolter, "OptNet: Differentiable Optimization as a
+  Layer in Neural Networks," 2017.
+- C. Katyal, "Differentiable Convex Optimization Layers in Neural Architectures:
+  Foundations and Perspectives," 2024.
 
-It does not by itself prove positive recurrence or any long-run queueing
-optimality claim.
+Supported use:
 
-## 8. Existing CertiQ z2 Proof Package
+These works support embedding exact convex optimization operators, such as the
+CertiQ KL projection, directly into the forward path.
 
-Source:
+Unsupported use:
+
+They do not provide the queueing geometry, dispatch certificate, or subcritical
+load statements required by CertiQ.
+
+## 6. Project-Local Proof Package
+
+Relevant sources:
 
 - `docs/z2/formal_math/01_backbone_stability_and_constant.md`
 - `docs/z2/formal_math/02_gate_inheritance_theorems.md`
 
-What it supports:
+Supported use:
 
-These project-local proofs support the legacy analytic base envelope,
-explicit \(C_B\), CTMC positive Harris recurrence for the base policy, hard
-fallback inheritance, and exact projection inheritance for the legacy
-dispatcher path.
+These files support the analytic base envelope and its certified inheritance
+statements.
 
-What it does not support:
+Unsupported use:
 
-They do not prove arbitrary neural residual stability, approximate projection,
-smooth fallback certification, or exact CTMC certification for adapters that
-violate the declared CTMC model.
+They do not automatically extend to arbitrary learned residuals or adapters
+that violate the stated CTMC model.

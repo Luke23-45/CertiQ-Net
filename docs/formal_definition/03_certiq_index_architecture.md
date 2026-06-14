@@ -1,80 +1,102 @@
 # CertiQ Dispatcher Architecture
 
-## 1. Model Architecture
+## 1. Certified Index Model
 
-The repository implements one certified dispatch model:
-
-- `CertiQIndexModel`
-  - learned marginal-cost index,
-  - SED/QMD-aligned backbone,
-  - exact KL projection with a fixed QMD budget.
-
-The architectural pattern is:
+The canonical learned dispatcher is the CertiQ index model. Its policy takes
+the form
 
 \[
-\pi^\Theta(Q,\mu,\xi)
+\pi^\Theta(x)
 =
-\mathcal C_Q\!\left(
-\mathcal A_\Theta(Q,\mu,\xi),
-\mathcal B(Q,\mu)
-\right).
+\mathcal C_x\!\left(\mathcal A_\Theta(x),\mathcal B(Q,\mu)\right),
+\qquad
+x=(Q,\mu,\xi).
 \]
 
-## 2. Index Model
+The proposal map \(\mathcal A_\Theta\) produces a raw distribution over
+resources, and the certificate map \(\mathcal C_x\) converts that proposal into
+an admissible policy.
 
-The index model is trained against the quadratic drift geometry
+## 2. Learned Index Representation
+
+The index model uses the quadratic-min-drift geometry
 
 \[
 d_i^{QMD}(Q,\mu)=\frac{2Q_i+1}{\mu_i}.
 \]
 
-The learned head predicts a residual \(r_i^\Theta\) and an index value
+Let \(r_i^\Theta(Q,\mu,\xi)\) denote a learned residual correction. The learned
+index is
 
 \[
 \hat I_i(Q,\mu,\xi)=d_i^{QMD}(Q,\mu)+r_i^\Theta(Q,\mu,\xi).
 \]
 
-The raw proposal is
+The raw proposal is the softmax of the negative index:
 
 \[
-q_\Theta=\operatorname{softmax}\!\left(-\hat I_\Theta/\tau\right).
+q_\Theta(x)=\operatorname{softmax}\!\left(-\hat I_\Theta(x)/\tau\right),
+\qquad \tau>0.
 \]
 
-The certificate layer then applies the exact KL projection onto a fixed QMD budget:
+## 3. Shared-Feature Realization
+
+One admissible realization of \(\mathcal A_\Theta\) is a shared-resource
+encoder:
 
 \[
-\pi^\Theta
-=
-\arg\min_{\pi\in\Delta_N} KL(\pi\|q_\Theta)
-\quad\text{s.t.}\quad
-\sum_i \pi_i d_i^{QMD}\le d_{\min}(Q,\mu)+C.
+h_i=\phi([Q_i,\mu_i,\xi_i]),\qquad
+s=\rho(h_1,\ldots,h_N),\qquad
+u_i=\psi([h_i,s]),\qquad
+r_i^\Theta=g(u_i),
 \]
 
-This is implemented by exponential tilting with a Lagrange multiplier.
+with
 
-## 3. Certificate Boundary
+\[
+\hat I_i(Q,\mu,\xi)=z_i=d_i^{QMD}(Q,\mu)+r_i^\Theta(Q,\mu,\xi),
+\qquad
+q_\Theta(x)=\operatorname{softmax}(-z/\tau).
+\]
 
-The certificate boundary is part of the dispatcher itself. The final policy is
-the distribution passed to the simulator, trainer, and evaluator.
+Here \(\phi\), \(\psi\), and \(g\) are shared across resources, while \(\rho\)
+is permutation invariant. The scalar head \(g\) predicts the residual
+correction, and \(z\) is the resulting learned index.
 
-For the index model, the boundary is an exact KL projection with no additional
-tail controller in the forward path. Certification must be explicit at inference
-time.
+### 3.1 Structural Refinement Head
 
-## 4. Diagnostics
+The architecture may include an additional head
 
-Every forward pass emits auditable diagnostics. The core quantities are:
+\[
+r_{\mathrm{struct}}^\Theta:\mathcal X\to\mathbb R^k,
+\]
 
-1. certified arrival coordinate,
-2. proposal arrival coordinate,
-3. final arrival coordinate,
-4. certificate slack,
-5. usage raw and usage final,
-6. projection multiplier when applicable,
-7. projection activation flag,
-8. correction magnitude,
-9. policy entropy,
-10. selected resource summary.
+which predicts low-dimensional structural quantities such as slack, regime, or
+calibration features. This head is used inside the proposal module and does not
+replace the certificate layer.
 
-These diagnostics are not optional logging. They are part of the architecture
-definition.
+## 4. Certificate Boundary
+
+The certificate boundary is explicit and state dependent. The final policy is
+the certified distribution returned by \(\mathcal C_x\), not the raw proposal.
+This boundary is part of the dispatcher definition.
+
+## 5. Diagnostics
+
+Every forward pass must expose a diagnostics record containing at least:
+
+1. the raw proposal \(q_\Theta\),
+2. the certified policy \(\pi^\Theta\),
+3. the selected resource,
+4. the proposal arrival coordinate,
+5. the certified arrival coordinate,
+6. the certificate budget,
+7. the certificate slack,
+8. the projection multiplier,
+9. the projection activation flag,
+10. the correction magnitude,
+11. the policy entropy,
+12. the solver status,
+13. the fallback flag.
+
+The diagnostics record is part of the formal interface of the model.

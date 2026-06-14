@@ -1,137 +1,127 @@
 # Formal Dispatch Model
 
-## 1. Resources
+## 1. Resources And Context
 
-There are \(N\ge 1\) resources. Resource \(i\) has service capacity
-\(\mu_i>0\), and the capacity vector is
-\[
-\mu=(\mu_1,\ldots,\mu_N).
-\]
+Let \(N \ge 1\) denote the number of resources. Resource \(i\) has service
+capacity \(\mu_i>0\), and
 
-Total service capacity is
 \[
-\Lambda=\sum_{i=1}^N\mu_i.
+\mu=(\mu_1,\ldots,\mu_N)\in\mathbb R_+^N.
 \]
 
 Each resource may also carry context
+
 \[
-\xi_i\in\mathbb R^{d_\xi}.
+\xi_i\in\mathbb R^{d_\xi},
+\qquad
+\xi=(\xi_1,\ldots,\xi_N).
 \]
 
-The context may encode metadata, cost, compatibility, location, or any other
-domain signal. Context does not automatically enter the certificate. It enters
-certification only when the implementation contract or theorem statement names
-it explicitly.
+The context vector is an exogenous feature of the resource. It may encode
+resource attributes such as location, compatibility, cost, or other domain
+information.
 
-## 2. Arrivals And State
+## 2. Queue State And Arrivals
 
-Jobs arrive online. In the primary CTMC model, arrivals are Poisson with rate
-\[
-\lambda>0.
-\]
+The system state is
 
-The state is
 \[
 Q=(Q_1,\ldots,Q_N)\in\mathbb Z_+^N,
 \]
-where \(Q_i\) is the number of queued or active jobs at resource \(i\).
 
-The primary CTMC assumptions require
+where \(Q_i\) is the number of jobs currently assigned to resource \(i\).
+
+In the primary continuous-time Markov chain model, arrivals form a Poisson
+process with rate \(\lambda>0\). The total service capacity is
+
+\[
+\Lambda=\sum_{i=1}^N \mu_i,
+\]
+
+and the subcritical load condition is
+
 \[
 \lambda<\Lambda.
 \]
 
-This is the subcritical load condition. It is necessary for the system-level
-model, but it does not certify an arbitrary policy.
+## 3. Action Space
 
-## 3. Actions
+At each arrival epoch, the dispatcher outputs a distribution
 
-At each arrival the dispatcher observes \((Q,\mu,\xi)\) and outputs a policy
 \[
 \pi(Q,\mu,\xi)\in\Delta_N,
 \qquad
-\Delta_N=\{p\in\mathbb R_+^N:\sum_i p_i=1\}.
+\Delta_N=\left\{p\in\mathbb R_+^N:\sum_{i=1}^N p_i=1\right\}.
 \]
 
 The arriving job is assigned to resource \(i\) with probability \(\pi_i\).
-In the codebase this policy is produced either by the legacy reflected-pressure
-dispatcher or by the learned index model.
 
-## 4. Service Model
+## 4. Service Dynamics
 
-For the primary CTMC model, service completions are exponential. When
-\(Q_i>0\), resource \(i\) completes one job at rate \(\mu_i\).
+When \(Q_i>0\), resource \(i\) completes jobs at rate \(\mu_i\). Under policy
+\(\pi\), the generator acting on bounded \(f:\mathbb Z_+^N\to\mathbb R\) is
 
-The generator under policy \(\pi\) is
 \[
 (\mathcal L_\pi f)(Q)
 =
-\lambda\sum_i\pi_i(Q,\mu,\xi)[f(Q+e_i)-f(Q)]
-+
-\sum_i\mu_i\mathbf 1_{\{Q_i>0\}}[f(Q-e_i)-f(Q)].
+\lambda\sum_{i=1}^N \pi_i(Q,\mu,\xi)\bigl[f(Q+e_i)-f(Q)\bigr]
++\sum_{i=1}^N \mu_i\,\mathbf 1_{\{Q_i>0\}}\bigl[f(Q-e_i)-f(Q)\bigr].
 \]
 
-The policy controls only the arrival term. Service dynamics are fixed by
-\(\mu\).
+The policy controls only the routing term.
 
-## 5. Objective
+## 5. Performance Objective
 
-The default performance objective is average queueing cost
+The long-run average cost of policy \(\pi\) is
+
 \[
 J(\pi)
 =
 \limsup_{T\to\infty}
 \frac1T
-\mathbb E_\pi
-\left[
-\int_0^T c(Q(t),\mu,\xi)\,dt
-\right].
+\mathbb E_\pi\!\left[\int_0^T c(Q(t),\mu,\xi)\,dt\right].
 \]
 
-The canonical cost is total backlog:
+The canonical cost is total backlog,
+
 \[
-c(Q)=\sum_i Q_i.
+c(Q)=\sum_{i=1}^N Q_i.
 \]
 
-Weighted costs are allowed when weights are positive and bounded:
-\[
-c(Q,\mu,\xi)=\sum_i w_i(\mu,\xi)Q_i.
-\]
+Weighted costs may be used when the weights are positive and bounded.
 
-Certification is about stability and admissibility. It is not a proof of
-optimality.
+## 6. Delay-Aligned Geometry
 
-## 6. Delay-Aligned Comparison Geometry
+Two queueing geometries are used throughout the CertiQ family:
 
-The repository implements two classical routing indices for comparison and
-baseline evaluation:
 \[
 d_i^{SED}(Q,\mu)=\frac{Q_i+1}{\mu_i},
 \qquad
 d_i^{QMD}(Q,\mu)=\frac{2Q_i+1}{\mu_i}.
 \]
 
-These indices define the SED and quadratic-min-drift baselines, and they also
-anchor the learned index model. The index model learns a residual correction
-on top of the quadratic drift index.
+The first is the shortest-expected-delay geometry. The second is the
+quadratic-min-drift geometry used by the index model.
 
-## 7. Adapter Contract
+## 7. Adapter Specification
 
-A domain adapter maps a real system into
+A domain adapter maps an application into
+
 \[
 \mathcal D=(N,\lambda,\mu,\xi,Q,c).
 \]
 
-An adapter must state:
+The adapter must specify:
 
-1. what counts as an arrival,
-2. what counts as a resource,
-3. how \(\mu_i\) is measured,
-4. what \(Q_i\) counts,
-5. what service law is assumed,
-6. what context \(\xi_i\) means,
-7. what cost is optimized,
-8. whether the CTMC assumptions apply exactly.
+1. the arrival process,
+2. the resource set,
+3. the meaning of \(\mu_i\),
+4. the meaning of \(Q_i\),
+5. the service law,
+6. the meaning of \(\xi_i\),
+7. the performance cost,
+8. whether the CTMC assumptions hold exactly.
 
-If the adapter violates the CTMC assumptions, CertiQ may still be used
-empirically, but no CTMC stability claim should be attached to that run.
+If the CTMC assumptions do not hold exactly, the model may still be used as an
+empirical dispatcher, but the CTMC generator interpretation does not apply
+without qualification.

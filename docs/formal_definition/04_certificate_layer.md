@@ -1,78 +1,85 @@
 # Certificate Layer
 
-## 1. Certificate Quantity
+## 1. Arrival Coordinate
 
-For any policy \(\pi\) and any dispatch geometry \(d(Q,\mu)\), define the
-arrival coordinate
+Let \(d(Q,\mu)=(d_1(Q,\mu),\ldots,d_N(Q,\mu))\) be a dispatch geometry. For any
+policy \(\pi\in\Delta_N\), define the arrival coordinate
+
 \[
-A_\pi(Q,\mu)=\sum_i \pi_i(Q,\mu,\xi)\,d_i(Q,\mu).
+A_\pi(Q,\mu)=\sum_{i=1}^N \pi_i(Q,\mu,\xi)\,d_i(Q,\mu).
 \]
 
-The certificate compares the proposed arrival coordinate to a state-dependent
-budget \(B(Q,\mu)\).
+The certificate compares \(A_\pi(Q,\mu)\) against a state-dependent budget
+\(B(Q,\mu)\).
 
-For the index model, the canonical geometry is the quadratic drift index
+For the canonical index model,
+
 \[
 d_i^{QMD}(Q,\mu)=\frac{2Q_i+1}{\mu_i},
 \qquad
-B(Q,\mu)=\min_i d_i^{QMD}(Q,\mu)+C.
+B(Q,\mu)=\min_{1\le i\le N} d_i^{QMD}(Q,\mu)+C,
 \]
 
-## 2. Exact KL Projection
+where \(C\ge 0\) is a fixed slack constant.
 
-The learned index model certifies by solving
+## 2. Certified Policy
+
+Given a raw proposal \(q_\Theta(x)\in\Delta_N\), the certified policy is
+
 \[
-\pi^\star
+\pi^\star(x)
 =
-\arg\min_{\pi\in\Delta_N} KL(\pi\|q_\Theta)
-\quad\text{s.t.}\quad
+\arg\min_{\pi\in\Delta_N} \mathrm{KL}(\pi\|q_\Theta(x))
+\quad\text{subject to}\quad
 A_\pi(Q,\mu)\le B(Q,\mu).
 \]
 
-When the constraint is active, the solution has the form
+## 3. Closed-Form Projection
+
+Assume \(q_{\Theta,i}(x)>0\) for every \(i\). If the feasible set is nonempty,
+the projection problem has a unique minimizer. When the constraint is active,
+the solution has the form
+
 \[
 \pi_i^\star(\nu)
 =
-\frac{q_i \exp(-\nu d_i)}{\sum_j q_j \exp(-\nu d_j)},
-\qquad \nu\ge 0.
+\frac{q_{\Theta,i}(x)\exp(-\nu d_i(Q,\mu))}
+{\sum_{j=1}^N q_{\Theta,j}(x)\exp(-\nu d_j(Q,\mu))},
+\qquad \nu\ge 0,
 \]
 
-The Lagrange multiplier \(\nu\) is found by bisection. If the proposal already
-satisfies the budget, then \(\nu=0\) and the policy is unchanged.
+with \(\nu\) chosen so that
 
-The operator is exact at the level of the implemented numerical tolerance. It
-is not a smooth approximation of the constraint set.
+\[
+\sum_{i=1}^N \pi_i^\star(\nu)\,d_i(Q,\mu)=B(Q,\mu).
+\]
 
-The budget \(C\) is a fixed certificate slack used by the current canonical
-implementation. It is a constant scalar, not a state-dependent slack function.
+If the raw proposal already satisfies the budget, then \(\nu=0\) and
+\(\pi^\star=q_\Theta\).
 
+## 4. Fallback Contract
 
+If the projection solver fails, does not converge, or returns a violation
+larger than the numerical tolerance \(\varepsilon_{\mathrm{proj}}>0\), the
+runtime must replace the result with a fallback policy \(\pi_{\mathrm{base}}\).
 
-## 3. Certificate Modes
+This condition is an implementation contract rather than a convex-analytic
+statement.
 
-The index model does not use a separate tail-controller fallback in its forward
-path. The only certification mode is the exact KL projection.
-
-## 4. Diagnostics Contract
+## 5. Diagnostics
 
 Every certified forward pass must report:
 
-1. \(A_{\mathrm{cert}}\),
-2. \(A_{\mathrm{proposal}}\),
-3. \(A_{\mathrm{final}}\),
-4. \(m(Q)\),
-5. \(B(Q)\),
-6. \(B(Q)-A_{\mathrm{final}}\),
-7. usage raw,
-8. usage final,
-9. usage cap,
-10. fallback flag,
-11. correction magnitude,
-12. policy entropy,
-13. selected resource,
-14. projection multiplier,
-15. projection activation flag,
-16. projection slack.
+1. \(A_{\mathrm{proposal}}\),
+2. \(A_{\mathrm{certified}}\),
+3. \(B(Q,\mu)\),
+4. \(B(Q,\mu)-A_{\mathrm{certified}}\),
+5. the projection multiplier \(\nu\),
+6. the projection activation flag,
+7. the correction magnitude \(\|\pi^\star-q_\Theta\|\),
+8. the policy entropy,
+9. the solver status,
+10. the fallback flag.
 
-These diagnostics are part of the formal contract, not optional experiment
-metadata.
+The diagnostics record is part of the formal interface of the certificate
+layer.
