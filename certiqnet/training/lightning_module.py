@@ -36,7 +36,7 @@ def _stack_mean(diags: list[DispatcherDiagnostics]) -> DispatcherDiagnostics:
             else:
                 values[name] = tensors[-1]
         else:
-            values[name] = torch.stack(tensors, dim=0).mean(dim=0)
+            values[name] = torch.stack(tensors, dim=0).mean(dim=0).detach()
     return DispatcherDiagnostics(**values)
 
 
@@ -188,28 +188,6 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
         advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
 
         rollout_diag = _stack_mean(policy_diagnostics)
-        rollout_diag = DispatcherDiagnostics(
-            A_cert=rollout_diag.A_cert,
-            A_proposal=rollout_diag.A_proposal,
-            A_final=rollout_diag.A_final,
-            m_Q=rollout_diag.m_Q,
-            B_Q=rollout_diag.B_Q,
-            certificate_slack=rollout_diag.certificate_slack,
-            usage_raw=rollout_diag.usage_raw,
-            usage_final=rollout_diag.usage_final,
-            usage_cap=rollout_diag.usage_cap,
-            fallback_active=rollout_diag.fallback_active,
-            correction_magnitude=rollout_diag.correction_magnitude,
-            policy_entropy=rollout_diag.policy_entropy,
-            selected_resource=rollout_diag.selected_resource,
-            pressure_mean=rollout_diag.pressure_mean,
-            pressure_max=rollout_diag.pressure_max,
-            pressure_update_norm=rollout_diag.pressure_update_norm,
-            projection_nu=rollout_diag.projection_nu,
-            projection_active=rollout_diag.projection_active,
-            proposal_slack=rollout_diag.proposal_slack,
-            solver_status=rollout_diag.solver_status,
-        )
 
         if self.use_ppo:
             opt = self.optimizers()
@@ -242,10 +220,11 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
                 bc_loss = self.loss_fn.bc_loss(curr_init_out.pi, expert_pi)
                 action_loss = self.loss_fn.action_loss(curr_init_out.proposal_logits, target_action)
                 margin_loss = self.loss_fn.margin_loss(curr_init_out.proposal_logits, target_action)
-                usage_loss = self.loss_fn.usage_penalty(rollout_diag.usage_final)
-                certificate_loss = self.loss_fn.certificate_penalty(rollout_diag)
-                correction_loss = self.loss_fn.correction_size_penalty(rollout_diag)
-                entropy_loss = entropies_t.mean()
+                usage_loss = self.loss_fn.usage_penalty(out_eval.diagnostics.usage_final)
+                certificate_loss = self.loss_fn.certificate_penalty(out_eval.diagnostics)
+                correction_loss = self.loss_fn.correction_size_penalty(out_eval.diagnostics)
+                entropy_loss = dist_eval.entropy().mean()
+                kl_loss_dynamic = self.loss_fn.policy_kl(out_eval.pi, out_eval.p_cert)
 
                 total_loss = (
                     self.loss_fn.cfg.rollout_weight * actor_loss
@@ -256,7 +235,7 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
                     + self.loss_fn.cfg.omega_usage * usage_loss
                     + self.loss_fn.cfg.omega_certificate * certificate_loss
                     + self.loss_fn.cfg.omega_correction * correction_loss
-                    + self.loss_fn.cfg.policy_kl_weight * kl_loss
+                    + self.loss_fn.cfg.policy_kl_weight * kl_loss_dynamic
                     - entropy_weight * entropy_loss
                 )
                 self.manual_backward(total_loss)
