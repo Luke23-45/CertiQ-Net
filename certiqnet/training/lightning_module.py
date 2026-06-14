@@ -259,6 +259,9 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
                     - entropy_weight * entropy_loss
                 )
                 self.manual_backward(total_loss)
+                clip_val = float(getattr(self.cfg.trainer, "gradient_clip_val", 1.0))
+                if clip_val > 0:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_val)
                 opt.step()
 
             self.log("actor", actor_loss, on_step=True, on_epoch=True)
