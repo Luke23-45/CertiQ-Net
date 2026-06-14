@@ -12,7 +12,7 @@ from certiqnet.dispatcher.certiq.certificate import (
     normalize_policy,
     policy_entropy,
 )
-from certiqnet.dispatcher.delay_geometry import sed_index
+from certiqnet.dispatcher.delay_geometry import sed_index, quadratic_drift_index
 from certiqnet.dispatcher.certiq.interaction import DispatchInteractionEncoder, index_token_features
 from certiqnet.dispatcher.types import DispatcherDiagnostics, DispatcherForward
 
@@ -99,6 +99,7 @@ class CertiQIndexModel(nn.Module):
         tau: float = 1.0,
         C: float = 2.0,
         beta: float = 1.0,
+        cost_fn: str = "sed",
         d_xi: int = 0,
         encoder_layers: int = 2,
         num_heads: int = 4,
@@ -110,6 +111,7 @@ class CertiQIndexModel(nn.Module):
         self.tau = tau
         self.C = C
         self.beta = beta
+        self.cost_fn = cost_fn
         self.d_xi = int(d_xi)
         self.index_head = MarginalIndexHead(
             N,
@@ -136,7 +138,12 @@ class CertiQIndexModel(nn.Module):
         batch, n = Q.shape
         mu_b = expand_mu(Q, mu)
 
-        cost = sed_index(Q, mu_b)
+        if self.cost_fn == "sed":
+            cost = sed_index(Q, mu_b)
+        elif self.cost_fn == "qmd":
+            cost = quadratic_drift_index(Q, mu_b)
+        else:
+            raise ValueError(f"Unknown cost_fn: {self.cost_fn}")
         cost_min = cost.min(dim=-1).values
         budget = torch.median(cost, dim=-1).values + self.C
         p_cert = normalize_policy(torch.softmax(-cost / self.tau, dim=-1))

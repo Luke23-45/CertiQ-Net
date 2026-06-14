@@ -285,6 +285,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             ppo_manual_clip_val=float(getattr(cfg.trainer, "ppo_manual_clip_val", 1.0)),
             entropy_warmup_epochs=int(cfg.trainer.entropy_warmup_epochs),
             imitation_warmup_epochs=int(cfg.trainer.imitation_warmup_epochs),
+            expert_mode=str(getattr(cfg.trainer, "expert_mode", "sed")),
             entropy_weight=float(cfg.loss.entropy_weight),
             lam=float(cfg.env.lam),
         )

@@ -16,7 +16,7 @@ except ModuleNotFoundError:
 from certiqnet.dispatcher.types import DispatcherDiagnostics
 from certiqnet.simulation.ctmc import CTMCEnvironment
 from certiqnet.train.common.loss import CertiQNetLoss
-from certiqnet.dispatcher.delay_geometry import sed_index
+from certiqnet.dispatcher.delay_geometry import sed_index, quadratic_drift_index
 
 
 def validation_selection_score(violation: Tensor, avg_cost: Tensor, p95_backlog: Tensor) -> Tensor:
@@ -59,8 +59,9 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         ppo_clip_epsilon: float = 0.2,
         ppo_manual_clip_val: float = 1.0,
         entropy_warmup_epochs: int = 20,
-        imitation_warmup_epochs: int = 20,
-        entropy_weight: float = 0.001,
+        imitation_warmup_epochs: int = 0,
+        expert_mode: str = "sed",
+        entropy_weight: float = 0.01,
         lam: float = 1.0,
     ) -> None:
         super().__init__()
@@ -70,8 +71,9 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self.weight_decay = weight_decay
         self.rollout_horizon = int(rollout_horizon)
         self.entropy_warmup_epochs = int(entropy_warmup_epochs)
-        self.imitation_warmup_epochs = int(imitation_warmup_epochs)
+        self.imitation_warmup_epochs = imitation_warmup_epochs
         self.use_ppo = bool(use_ppo)
+        self.expert_mode = expert_mode
         self.ppo_epochs = int(ppo_epochs)
         self.ppo_clip_epsilon = float(ppo_clip_epsilon)
         self.entropy_weight = float(entropy_weight)
@@ -119,8 +121,13 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
     def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor:
         if mu.dim() == 1:
             mu = mu.unsqueeze(0).expand(Q.shape[0], -1)
-        mu_safe = mu.clamp_min(torch.finfo(Q.dtype).tiny)
-        return sed_index(Q, mu_safe).argmin(dim=-1)
+        mu_safe = mu.clamp_min(mu.new_tensor(1e-12))
+        if self.expert_mode == "sed":
+            return sed_index(Q, mu_safe).argmin(dim=-1)
+        elif self.expert_mode == "qmd":
+            return quadratic_drift_index(Q, mu_safe).argmin(dim=-1)
+        else:
+            raise ValueError(f"Unknown expert_mode: {self.expert_mode}")
 
     # ── Domain hook ─────────────────────────────────────────────────
 
