@@ -51,8 +51,8 @@ class CertiQNetLoss(nn.Module):
         return (1.0 - usage).square().mean()
 
     def certificate_penalty(self, diag: DispatcherDiagnostics) -> Tensor:
-        """Squared positive certificate violation penalty."""
-        return (diag.A_final - diag.B_Q).clamp(min=0.0).square().mean()
+        """Squared positive certificate violation penalty on the raw proposal."""
+        return (diag.A_proposal - diag.B_Q).clamp(min=0.0).square().mean()
 
     def correction_size_penalty(self, diag: DispatcherDiagnostics) -> Tensor:
         """Proposal correction size penalty."""

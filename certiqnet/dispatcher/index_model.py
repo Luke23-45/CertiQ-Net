@@ -132,10 +132,19 @@ class CertiQIndexModel(nn.Module):
         proposal_logits = -index_values / effective_tau
 
         if certify:
-            pi, nu = kl_project_linear(q_proposal, drift, budget)
+            pi, nu, solver_status = kl_project_linear(q_proposal, drift, budget)
         else:
             pi = q_proposal
             nu = torch.zeros(batch, device=Q.device, dtype=Q.dtype)
+            solver_status = torch.zeros(batch, device=Q.device, dtype=torch.long)
+
+        fallback_needed = solver_status > 0
+        if fallback_needed.any():
+            fallback_idx = drift.argmin(dim=-1)
+            pi_fallback = torch.zeros_like(pi)
+            pi_fallback.scatter_(1, fallback_idx.unsqueeze(-1), 1.0)
+            pi = torch.where(fallback_needed.unsqueeze(-1), pi_fallback, pi)
+            nu = torch.where(fallback_needed, torch.zeros_like(nu), nu)
 
         projected = (pi - q_proposal).abs().sum(dim=-1) > 1e-8
         a_proposal = arrival_coordinate(q_proposal, drift)
@@ -152,7 +161,7 @@ class CertiQIndexModel(nn.Module):
             usage_raw=torch.ones(batch, device=Q.device, dtype=Q.dtype),
             usage_final=(~projected).to(dtype=Q.dtype),
             usage_cap=torch.ones(batch, device=Q.device, dtype=Q.dtype),
-            fallback_active=torch.zeros(batch, dtype=torch.bool, device=Q.device),
+            fallback_active=fallback_needed,
             correction_magnitude=correction,
             policy_entropy=policy_entropy(pi),
             selected_resource=pi.argmax(dim=-1),
@@ -161,7 +170,8 @@ class CertiQIndexModel(nn.Module):
             pressure_update_norm=torch.zeros(batch, device=Q.device, dtype=Q.dtype),
             projection_nu=nu,
             projection_active=projected,
-            projection_slack=budget - a_proposal,
+            proposal_slack=budget - a_proposal,
+            solver_status=solver_status,
         )
         return DispatcherForward(
             pi=pi,

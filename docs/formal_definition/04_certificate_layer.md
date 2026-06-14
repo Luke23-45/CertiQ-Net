@@ -57,14 +57,31 @@ with \(\nu\) chosen so that
 If the raw proposal already satisfies the budget, then \(\nu=0\) and
 \(\pi^\star=q_\Theta\).
 
-## 4. Fallback Contract
+## 4. Solver Status And Fallback
 
-If the projection solver fails, does not converge, or returns a violation
-larger than the numerical tolerance \(\varepsilon_{\mathrm{proj}}>0\), the
-runtime must replace the result with a fallback policy \(\pi_{\mathrm{base}}\).
+Let the solver status be a discrete variable
 
-This condition is an implementation contract rather than a convex-analytic
-statement.
+\[
+s(x)\in\{\textsf{success},\textsf{infeasible},\textsf{tol\_violation}\}.
+\]
+
+Let \(\varepsilon_{\mathrm{proj}}>0\) be the projection tolerance and let
+\(\pi_{\mathrm{base}}(x)\) denote a certified fallback policy.
+
+The runtime policy is
+
+\[
+\pi^{\mathrm{rt}}(x)
+=
+\begin{cases}
+\pi^\star(x), & \text{if } s(x)=\textsf{success} \text{ and } A_{\pi^\star}(x)\le B(x)+\varepsilon_{\mathrm{proj}},\\
+\pi_{\mathrm{base}}(x), & \text{otherwise}.
+\end{cases}
+\]
+
+If the fallback policy is admissible for every state, then the runtime policy
+is defined for every state and is admissible whenever either the certificate
+layer succeeds or the fallback policy is used.
 
 ## 5. Diagnostics
 
@@ -72,14 +89,32 @@ Every certified forward pass must report:
 
 1. \(A_{\mathrm{proposal}}\),
 2. \(A_{\mathrm{certified}}\),
-3. \(B(Q,\mu)\),
-4. \(B(Q,\mu)-A_{\mathrm{certified}}\),
-5. the projection multiplier \(\nu\),
-6. the projection activation flag,
-7. the correction magnitude \(\|\pi^\star-q_\Theta\|\),
-8. the policy entropy,
-9. the solver status,
-10. the fallback flag.
+3. the selected resource,
+4. \(B(Q,\mu)\),
+5. \(B(Q,\mu)-A_{\mathrm{certified}}\),
+6. the projection multiplier \(\nu\),
+7. the projection activation flag,
+8. the correction magnitude \(\|\pi^\star-q_\Theta\|\),
+9. the policy entropy,
+10. the solver status,
+11. the fallback flag,
+12. the raw proposal \(q_\Theta\),
+13. the certified policy \(\pi^\star\).
 
 The diagnostics record is part of the formal interface of the certificate
 layer.
+
+## 6. Proposal-Level Certificate Penalty
+
+Let \(A_{q_\Theta}(x)\) denote the arrival coordinate of the raw proposal and
+\(B(x)\) the corresponding budget. Define the proposal-level certificate
+penalty by
+
+\[
+\mathcal L_{\mathrm{cert}}^{\mathrm{prop}}(\Theta)
+=
+\mathbb E\!\left[\bigl(A_{q_\Theta}(x)-B(x)\bigr)_+^2\right].
+\]
+
+This penalty can provide a nontrivial training signal for the proposal module
+whenever the raw proposal violates the budget on a set of positive measure.

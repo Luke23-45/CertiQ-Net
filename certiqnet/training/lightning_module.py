@@ -32,7 +32,10 @@ def _stack_mean(diags: list[DispatcherDiagnostics]) -> DispatcherDiagnostics:
         if tensors[0].dtype == torch.bool:
             values[name] = torch.stack(tensors, dim=0).any(dim=0)
         elif tensors[0].dtype in {torch.int32, torch.int64, torch.long}:
-            values[name] = tensors[-1]
+            if name == "solver_status":
+                values[name] = torch.stack(tensors, dim=0).max(dim=0).values
+            else:
+                values[name] = tensors[-1]
         else:
             values[name] = torch.stack(tensors, dim=0).mean(dim=0)
     return DispatcherDiagnostics(**values)
@@ -187,7 +190,8 @@ class CertiQNetLightningModule(pl.LightningModule if pl is not None else torch.n
             pressure_update_norm=rollout_diag.pressure_update_norm,
             projection_nu=rollout_diag.projection_nu,
             projection_active=rollout_diag.projection_active,
-            projection_slack=rollout_diag.projection_slack,
+            proposal_slack=rollout_diag.proposal_slack,
+            solver_status=rollout_diag.solver_status,
         )
 
         actor_loss = self.loss_fn.actor_loss(log_probs_t.reshape(-1), advantages.reshape(-1))

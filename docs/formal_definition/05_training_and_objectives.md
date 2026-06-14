@@ -16,27 +16,51 @@ The training loss may be written as
 \mathcal L(\Theta)
 =
 \omega_{\mathrm{roll}}\mathcal L_{\mathrm{roll}}
-+\omega_{\mathrm{bc}}\mathcal L_{\mathrm{bc}}
-+\omega_{\mathrm{res}}\mathcal L_{\mathrm{res}}
++\omega_{\mathrm{ce}}\mathcal L_{\mathrm{ce}}
++\omega_{\mathrm{margin}}\mathcal L_{\mathrm{margin}}
 +\omega_{\mathrm{ent}}\mathcal L_{\mathrm{ent}}
-+\omega_{\mathrm{cert}}\mathcal L_{\mathrm{cert}},
++\omega_{\mathrm{cert}}\mathcal L_{\mathrm{cert}}^{\mathrm{prop}},
 \]
 
-where the terms denote rollout cost, behavior-cloning or distillation loss,
-residual regression, entropy regularization, and certificate regularization.
+where the terms denote rollout cost, cross-entropy behavior-cloning loss,
+heuristic ranking margin loss, entropy regularization, and the proposal-level
+certificate penalty.
 
 ## 3. Certificate Penalty
 
-The certificate penalty may be defined as
+The certificate penalty should be defined at the proposal level:
 
 \[
-\mathcal L_{\mathrm{cert}}
+\mathcal L_{\mathrm{cert}}^{\mathrm{prop}}
 =
 \mathbb E\!\left[\bigl(A_{q_\Theta}(Q,\mu)-B(Q,\mu)\bigr)_+^2\right].
 \]
 
-If the projection layer is active and numerically exact, this term is zero up
-to tolerance.
+If the projection layer is active and numerically exact, the analogous
+final-policy penalty is degenerate because the certified policy already
+satisfies the budget by construction.
+
+The proposal-level penalty is the useful training signal because it can remain
+nonzero when the raw proposal violates the budget.
+
+### 3.1 Final-Policy Degeneracy
+
+Assume the certificate layer returns a feasible policy \(\pi^\star(x)\)
+satisfying
+
+\[
+A_{\pi^\star}(x)\le B(x)
+\]
+
+for every state \(x\) in its domain. Then the final-policy penalty
+
+\[
+\mathcal L_{\mathrm{cert}}^{\mathrm{final}}(\Theta)
+=
+\mathbb E\!\left[\bigl(A_{\pi^\star}(x)-B(x)\bigr)_+^2\right]
+\]
+
+is identically zero whenever the certificate layer succeeds.
 
 ## 4. Proposal Learning
 

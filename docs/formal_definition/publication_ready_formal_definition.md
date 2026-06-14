@@ -324,14 +324,31 @@ with \(\nu\) chosen so that
 If the raw proposal already satisfies the budget, then \(\nu=0\) and
 \(\pi^\star=q_\Theta\).
 
-### 6.1 Fallback Contract
+### 6.1 Solver Status And Fallback
 
-If the projection solver fails, does not converge, or returns a violation
-larger than the numerical tolerance \(\varepsilon_{\mathrm{proj}}>0\), the
-runtime must replace the result with a fallback policy \(\pi_{\mathrm{base}}\).
+Let the solver status be a discrete variable
 
-This condition is an implementation contract rather than a convex-analytic
-statement.
+\[
+s(x)\in\{\textsf{success},\textsf{infeasible},\textsf{tol\_violation}\}.
+\]
+
+Let \(\varepsilon_{\mathrm{proj}}>0\) be the projection tolerance and let
+\(\pi_{\mathrm{base}}(x)\) denote a certified fallback policy.
+
+The runtime policy is
+
+\[
+\pi^{\mathrm{rt}}(x)
+=
+\begin{cases}
+\pi^\star(x), & \text{if } s(x)=\textsf{success} \text{ and } A_{\pi^\star}(x)\le B(x)+\varepsilon_{\mathrm{proj}},\\
+\pi_{\mathrm{base}}(x), & \text{otherwise}.
+\end{cases}
+\]
+
+If the fallback policy is admissible for every state, then the runtime policy
+is defined for every state and is admissible whenever either the certificate
+layer succeeds or the fallback policy is used.
 
 ### 6.2 Diagnostics
 
@@ -368,25 +385,49 @@ The training loss may be written as
 \mathcal L(\Theta)
 =
 \omega_{\mathrm{roll}}\mathcal L_{\mathrm{roll}}
-+\omega_{\mathrm{bc}}\mathcal L_{\mathrm{bc}}
-+\omega_{\mathrm{res}}\mathcal L_{\mathrm{res}}
++\omega_{\mathrm{ce}}\mathcal L_{\mathrm{ce}}
++\omega_{\mathrm{margin}}\mathcal L_{\mathrm{margin}}
 +\omega_{\mathrm{ent}}\mathcal L_{\mathrm{ent}}
-+\omega_{\mathrm{cert}}\mathcal L_{\mathrm{cert}},
++\omega_{\mathrm{cert}}\mathcal L_{\mathrm{cert}}^{\mathrm{prop}},
 \]
 
-where the terms denote rollout cost, behavior-cloning or distillation loss,
-residual regression, entropy regularization, and certificate regularization.
+where the terms denote rollout cost, cross-entropy behavior-cloning loss,
+heuristic ranking margin loss, entropy regularization, and the proposal-level
+certificate penalty.
 
-The certificate penalty may be defined as
+The certificate penalty should be defined at the proposal level:
 
 \[
-\mathcal L_{\mathrm{cert}}
+\mathcal L_{\mathrm{cert}}^{\mathrm{prop}}
 =
 \mathbb E\!\left[\bigl(A_{q_\Theta}(Q,\mu)-B(Q,\mu)\bigr)_+^2\right].
 \]
 
-If the projection layer is active and numerically exact, this term is zero up
-to tolerance.
+If the projection layer is active and numerically exact, the analogous
+final-policy penalty is degenerate because the certified policy already
+satisfies the budget by construction.
+
+The proposal-level penalty is the useful training signal because it can remain
+nonzero when the raw proposal violates the budget.
+
+#### Final-Policy Degeneracy
+
+Assume the certificate layer returns a feasible policy \(\pi^\star(x)\)
+satisfying
+
+\[
+A_{\pi^\star}(x)\le B(x)
+\]
+
+for every state \(x\) in its domain. Then the final-policy penalty
+
+\[
+\mathcal L_{\mathrm{cert}}^{\mathrm{final}}(\Theta)
+=
+\mathbb E\!\left[\bigl(A_{\pi^\star}(x)-B(x)\bigr)_+^2\right]
+\]
+
+is identically zero whenever the certificate layer succeeds.
 
 The learned proposal may be trained as a residual over the QMD geometry:
 

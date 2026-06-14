@@ -38,8 +38,8 @@ class CertificateMetrics:
     avg_certificate_slack: float
     projection_activation_rate: float
     projection_dual_mean: float
-    projection_slack_min: float
-    projection_slack_mean: float
+    proposal_slack_min: float
+    proposal_slack_mean: float
     tail_fallback_activation_rate: float
     usage_activation_rate: float
     usage_mean_activation: float
@@ -107,7 +107,7 @@ def aggregate_metrics(
     fallback = torch.cat([d.fallback_active.detach().flatten().cpu() for d in diagnostics])
     projection_active = torch.cat([d.projection_active.detach().flatten().cpu() for d in diagnostics])
     projection_nu = torch.cat([d.projection_nu.detach().flatten().cpu() for d in diagnostics])
-    projection_slack = torch.cat([d.projection_slack.detach().flatten().cpu() for d in diagnostics])
+    proposal_slack = torch.cat([d.proposal_slack.detach().flatten().cpu() for d in diagnostics])
     correction = torch.cat([d.correction_magnitude.detach().flatten().cpu() for d in diagnostics])
     pressure_mean = torch.cat([d.pressure_mean.detach().flatten().cpu() for d in diagnostics])
     pressure_max = torch.cat([d.pressure_max.detach().flatten().cpu() for d in diagnostics])
@@ -137,8 +137,8 @@ def aggregate_metrics(
         avg_certificate_slack=float(slack.mean().item()),
         projection_activation_rate=float(projection_active.float().mean().item()),
         projection_dual_mean=float(projection_nu.mean().item()),
-        projection_slack_min=float(projection_slack.min().item()),
-        projection_slack_mean=float(projection_slack.mean().item()),
+        proposal_slack_min=float(proposal_slack.min().item()),
+        proposal_slack_mean=float(proposal_slack.mean().item()),
         tail_fallback_activation_rate=float(fallback.float().mean().item()),
         usage_activation_rate=float((usage_final > 0.1).float().mean().item()),
         usage_mean_activation=float(usage_final.mean().item()),

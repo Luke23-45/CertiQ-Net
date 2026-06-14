@@ -19,7 +19,7 @@ def kl_project_linear(
     *,
     iterations: int = 48,
     tolerance: float = 1e-10,
-) -> tuple[Tensor, Tensor]:
+) -> tuple[Tensor, Tensor, Tensor]:
     """Project ``q`` onto ``{p in simplex : E_p[cost] <= budget}`` via KL.
 
     Uses exponential search for the Lagrange multiplier upper bound, then
@@ -34,8 +34,13 @@ def kl_project_linear(
         tolerance: feasibility tolerance (default 1e-10).
 
     Returns:
-        p: ``(B, N)`` projected distribution.
-        nu: ``(B,)`` Lagrange multiplier (zero when ``q`` is already feasible).
+        p: ``(B, N)`` projected (or fallback) distribution.
+        nu: ``(B,)`` Lagrange multiplier (zero when ``q`` is already feasible
+            or when a fallback is used).
+        solver_status: ``(B,)`` long tensor:
+            0 = success,
+            1 = infeasible (budget < min cost),
+            2 = tolerance violation.
     """
     assert q.dim() == 2, "q must be (B, N)"
     assert q.shape == cost.shape, "q and cost must have the same shape"
@@ -50,6 +55,8 @@ def kl_project_linear(
     cost_work = cost_work.clamp_min(eps)
     budget_work = budget_work.clamp_min(eps)
 
+    solver_status = torch.zeros(q.shape[0], device=q.device, dtype=torch.long)
+
     expected = (q_work * cost_work).sum(dim=-1)
     feasible = expected <= budget_work + tolerance
 
@@ -58,7 +65,7 @@ def kl_project_linear(
 
     mask = ~feasible
     if not mask.any():
-        return p.to(dtype=q.dtype), nu.to(dtype=q.dtype)
+        return p.to(dtype=q.dtype), nu.to(dtype=q.dtype), solver_status
 
     q_masked = q_work[mask]
     cost_masked = cost_work[mask]
@@ -68,6 +75,11 @@ def kl_project_linear(
 
     infeasible_budget = budget_masked < min_cost
     if infeasible_budget.any():
+        solver_status[mask] = torch.where(
+            infeasible_budget,
+            torch.tensor(1, device=q.device, dtype=torch.long),
+            solver_status[mask],
+        )
         argmin_idx = cost_masked.argmin(dim=-1)
         p_dirac = torch.zeros_like(q_masked)
         p_dirac.scatter_(1, argmin_idx.unsqueeze(-1), 1.0)
@@ -79,12 +91,12 @@ def kl_project_linear(
     feasible_masked = expected_masked <= budget_masked + tolerance
     if feasible_masked.all():
         p[mask] = q_masked
-        return p.to(dtype=q.dtype), nu.to(dtype=q.dtype)
+        return p.to(dtype=q.dtype), nu.to(dtype=q.dtype), solver_status
 
     bisect_mask = ~feasible_masked
     if not bisect_mask.any():
         p[mask] = q_masked
-        return p.to(dtype=q.dtype), nu.to(dtype=q.dtype)
+        return p.to(dtype=q.dtype), nu.to(dtype=q.dtype), solver_status
 
     q_bisect = q_masked[bisect_mask]
     cost_bisect = cost_masked[bisect_mask]
@@ -128,14 +140,14 @@ def kl_project_linear(
     min_cost = cost_work.min(dim=-1).values
     effective_budget = torch.max(budget_work, min_cost)
     audit_violation = (expected_final - effective_budget).clamp_min(0.0)
-    max_viol = audit_violation.max().item()
-    audit_tol = max(tolerance + 1e-5, 1e-4)
-    if max_viol > audit_tol:
-        raise RuntimeError(
-            f"KL projection violated constraint by {max_viol:.3e} > {audit_tol:.3e}"
-        )
 
-    return p.to(dtype=q.dtype), nu.to(dtype=q.dtype)
+    bisect_indices = mask.nonzero(as_tuple=True)[0][~feasible_masked]
+    tol_violation = audit_violation[bisect_indices] > max(tolerance + 1e-5, 1e-4)
+    if tol_violation.any():
+        viol_indices = bisect_indices[tol_violation]
+        solver_status[viol_indices] = 2
+
+    return p.to(dtype=q.dtype), nu.to(dtype=q.dtype), solver_status
 
 
 def policy_entropy(pi: Tensor) -> Tensor:

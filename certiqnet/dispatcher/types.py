@@ -27,7 +27,8 @@ class DispatcherDiagnostics:
     pressure_update_norm: Tensor
     projection_nu: Tensor
     projection_active: Tensor
-    projection_slack: Tensor
+    proposal_slack: Tensor
+    solver_status: Tensor
 
 
 @dataclass(frozen=True)

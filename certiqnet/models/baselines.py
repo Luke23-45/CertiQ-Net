@@ -55,7 +55,8 @@ def _diag(
         pressure_update_norm=torch.zeros_like(nan),
         projection_nu=torch.zeros_like(nan),
         projection_active=torch.zeros(Q.shape[0], dtype=torch.bool, device=Q.device),
-        projection_slack=B_q - A_final,
+        proposal_slack=B_q - A_final,
+        solver_status=torch.zeros(Q.shape[0], dtype=torch.long, device=Q.device),
     )
 
 
