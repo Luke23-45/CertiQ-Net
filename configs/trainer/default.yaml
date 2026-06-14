@@ -21,3 +21,7 @@ trainer:
   ppo_epochs: 4
   ppo_batch_size: 64
   ppo_manual_clip_val: 1.0
+  critic_bootstrap_epochs: 3
+  imitation_decay_rate: 0.96
+  target_kl_cert: 0.01
+  initial_policy_kl_weight: 0.05

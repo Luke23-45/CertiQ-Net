@@ -286,6 +286,10 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             entropy_warmup_epochs=int(cfg.trainer.entropy_warmup_epochs),
             imitation_warmup_epochs=int(cfg.trainer.imitation_warmup_epochs),
             expert_mode=str(getattr(cfg.trainer, "expert_mode", "sed")),
+            critic_bootstrap_epochs=int(getattr(cfg.trainer, "critic_bootstrap_epochs", 3)),
+            imitation_decay_rate=float(getattr(cfg.trainer, "imitation_decay_rate", 0.96)),
+            target_kl_cert=float(getattr(cfg.trainer, "target_kl_cert", 0.01)),
+            initial_policy_kl_weight=float(getattr(cfg.trainer, "initial_policy_kl_weight", 0.05)),
             entropy_weight=float(cfg.loss.entropy_weight),
             lam=float(cfg.env.lam),
         )

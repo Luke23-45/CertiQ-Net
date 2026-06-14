@@ -61,6 +61,10 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         entropy_warmup_epochs: int = 20,
         imitation_warmup_epochs: int = 0,
         expert_mode: str = "sed",
+        critic_bootstrap_epochs: int = 3,
+        imitation_decay_rate: float = 0.96,
+        target_kl_cert: float = 0.01,
+        initial_policy_kl_weight: float = 0.05,
         entropy_weight: float = 0.01,
         lam: float = 1.0,
     ) -> None:
@@ -72,6 +76,11 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self.rollout_horizon = int(rollout_horizon)
         self.entropy_warmup_epochs = int(entropy_warmup_epochs)
         self.imitation_warmup_epochs = imitation_warmup_epochs
+        self.critic_bootstrap_epochs = critic_bootstrap_epochs
+        self.imitation_decay_rate = imitation_decay_rate
+        self.target_kl_cert = target_kl_cert
+        self.current_kl_weight = initial_policy_kl_weight
+        self.epoch_kl_records = []
         self.use_ppo = bool(use_ppo)
         self.expert_mode = expert_mode
         self.ppo_epochs = int(ppo_epochs)
@@ -103,19 +112,14 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         base = float(self.loss_fn.omega_bc)
         if epoch >= self.imitation_warmup_epochs:
             post_warmup = epoch - self.imitation_warmup_epochs
-            decay_epochs = 30
-            if post_warmup >= decay_epochs:
-                return 0.0
-            return base * 0.75 * (1.0 - post_warmup / decay_epochs)
-        frac = 1.0 - (epoch / max(self.imitation_warmup_epochs, 1))
-        return base * (0.5 + 0.5 * frac)
+            return base * (self.imitation_decay_rate ** post_warmup)
+        return base
 
     def _supervised_weight(self) -> float:
         epoch = int(getattr(self.trainer, "current_epoch", 0))
         if epoch >= self.imitation_warmup_epochs:
             post_warmup = epoch - self.imitation_warmup_epochs
-            decay_epochs = 40
-            return max(0.0, 1.0 - post_warmup / decay_epochs)
+            return self.imitation_decay_rate ** post_warmup
         return 1.0
 
     def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor:
@@ -261,9 +265,13 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 correction_loss = self.loss_fn.correction_size_penalty(out_eval.diagnostics)
                 entropy_loss = dist_eval.entropy().mean()
                 kl_loss_dynamic = self.loss_fn.policy_kl(out_eval.pi, out_eval.p_cert)
+                self.epoch_kl_records.append(kl_loss_dynamic.detach().cpu().item())
+
+                is_actor_active = (epoch >= self.imitation_warmup_epochs + self.critic_bootstrap_epochs)
+                effective_actor_weight = self.loss_fn.rollout_weight if is_actor_active else 0.0
 
                 total_loss = (
-                    self.loss_fn.rollout_weight * actor_loss
+                    effective_actor_weight * actor_loss
                     + self.loss_fn.value_weight * critic_loss
                     + imitation_weight * bc_loss
                     + supervised_weight * self.loss_fn.omega_action * action_loss
@@ -271,7 +279,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                     + self.loss_fn.omega_usage * usage_loss
                     + self.loss_fn.omega_certificate * certificate_loss
                     + self.loss_fn.omega_correction * correction_loss
-                    + self.loss_fn.policy_kl_weight * kl_loss_dynamic
+                    + self.current_kl_weight * kl_loss_dynamic
                     - entropy_weight * entropy_loss
                 )
                 self.manual_backward(total_loss)
@@ -311,8 +319,13 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 "kl": kl_loss,
                 "entropy": entropy_loss,
             }
+            
+            self.epoch_kl_records.append(kl_loss.detach().cpu().item())
+            is_actor_active = (epoch >= self.imitation_warmup_epochs + self.critic_bootstrap_epochs)
+            effective_actor_weight = self.loss_fn.rollout_weight if is_actor_active else 0.0
+
             losses["total"] = (
-                self.loss_fn.rollout_weight * actor_loss
+                effective_actor_weight * actor_loss
                 + self.loss_fn.value_weight * critic_loss
                 + imitation_weight * bc_loss
                 + supervised_weight * self.loss_fn.omega_action * action_loss
@@ -320,7 +333,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 + self.loss_fn.omega_usage * usage_loss
                 + self.loss_fn.omega_certificate * certificate_loss
                 + self.loss_fn.omega_correction * correction_loss
-                + self.loss_fn.policy_kl_weight * kl_loss
+                + self.current_kl_weight * kl_loss
                 - entropy_weight * entropy_loss
             )
 
@@ -342,6 +355,17 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             if hasattr(dm, "record_teacher_states"):
                 dm.record_teacher_states(Q0.detach().to("cpu", non_blocking=True))
         return None
+
+    def on_train_epoch_end(self) -> None:
+        epoch = getattr(self.trainer, "current_epoch", 0)
+        if epoch >= self.imitation_warmup_epochs and self.epoch_kl_records:
+            mean_kl = sum(self.epoch_kl_records) / len(self.epoch_kl_records)
+            if mean_kl > 1.5 * self.target_kl_cert:
+                self.current_kl_weight = min(2.0, self.current_kl_weight * 2.0)
+            elif mean_kl < self.target_kl_cert / 1.5:
+                self.current_kl_weight = max(1e-4, self.current_kl_weight * 0.5)
+        self.epoch_kl_records.clear()
+        self.log("train/current_kl_weight", self.current_kl_weight)
 
     # ── Validation step ─────────────────────────────────────────────
 
