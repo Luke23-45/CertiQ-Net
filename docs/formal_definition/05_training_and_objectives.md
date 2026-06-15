@@ -19,48 +19,74 @@ The training loss may be written as
 +\omega_{\mathrm{ce}}\mathcal L_{\mathrm{ce}}
 +\omega_{\mathrm{margin}}\mathcal L_{\mathrm{margin}}
 +\omega_{\mathrm{ent}}\mathcal L_{\mathrm{ent}}
-+\omega_{\mathrm{cert}}\mathcal L_{\mathrm{cert}}^{\mathrm{prop}},
++\omega_{\mathrm{kl}}\mathcal L_{\mathrm{kl}},
 \]
 
 where the terms denote rollout cost, cross-entropy behavior-cloning loss,
-heuristic ranking margin loss, entropy regularization, and the proposal-level
-certificate penalty.
+heuristic ranking margin loss, entropy regularization, and the
+proposal-certificate KL penalty.
 
-## 3. Certificate Penalty
+The certificate penalty is no longer a function of the budget surplus;
+it is instead the reverse KL divergence from the uncertified proposal
+to the certified (projected) policy.
 
-The certificate penalty should be defined at the proposal level:
+## 3. Proposal-Certificate KL Penalty
+
+The KL penalty is defined at the proposal level:
 
 \[
-\mathcal L_{\mathrm{cert}}^{\mathrm{prop}}
+\mathcal L_{\mathrm{kl}}
 =
-\mathbb E\!\left[\bigl(A_{q_\Theta}(Q,\mu)-B(Q,\mu)\bigr)_+^2\right].
+\mathbb E\!\left[\mathrm{KL}\bigl(q_\Theta(\cdot\mid x)
+\;\|\; \pi^\star(\cdot\mid x)\bigr)\right],
 \]
 
-If the projection layer is active and numerically exact, the analogous
-final-policy penalty is degenerate because the certified policy already
-satisfies the budget by construction.
+where \(q_\Theta\) is the raw (uncertified) proposal distribution and
+\(\pi^\star\) is the certified policy obtained by the KL projection
+\(\pi^\star = \arg\min_{\pi\in\Delta_N} \mathrm{KL}(\pi\|q_\Theta)\)
+subject to the budget constraint
+\(\mathbb E_\pi[A] \le B\).
 
-The proposal-level penalty is the useful training signal because it can remain
-nonzero when the raw proposal violates the budget.
+This formulation penalises the proposal only when it places probability
+mass on actions that the certificate would cut off.  Because the
+certificate sets \(\pi^\star(a)=0\) for infeasible actions, the ratio
+\(q_\Theta(a)/\pi^\star(a)\) in the KL term diverges for any infeasible
+mass — providing a strong gradient signal to pull the proposal back
+into the feasible set.
 
-### 3.1 Final-Policy Degeneracy
+Conversely, exploration that stays entirely within the feasible set
+yields \(q_\Theta \approx \pi^\star\) and the KL penalty is near zero.
+The reverse-KL direction is mode-seeking, ensuring that the proposal is
+free to concentrate mass on any feasible action without penalty.
 
-Assume the certificate layer returns a feasible policy \(\pi^\star(x)\)
-satisfying
+### 3.1 Why Not a Budget-Violation Penalty
+
+A squared ReLU on budget surplus,
+\(\mathbb E[(A_{q_\Theta}-B)_+^2]\), penalises the proposal only at the
+level of the expected cost — it does not distinguish between different
+infeasible allocations and provides no incentive to concentrate
+probability on any particular feasible action.  The reverse-KL penalty
+is stronger and more structured: it forces the proposal to match the
+certified policy on a per-action basis, eliminating infeasible
+probability mass entirely rather than merely reducing the expected
+cost below budget.
+
+### 3.2 Gradient Semantics
+
+The certified policy \(\pi^\star\) is **detached** from the
+computational graph in the KL term:
 
 \[
-A_{\pi^\star}(x)\le B(x)
+\mathcal L_{\mathrm{kl}} = \mathbb E\,
+\bigl[\mathrm{KL}(q_\Theta \;\|\; \mathrm{sg}[\pi^\star])\bigr],
 \]
 
-for every state \(x\) in its domain. Then the final-policy penalty
-
-\[
-\mathcal L_{\mathrm{cert}}^{\mathrm{final}}(\Theta)
-=
-\mathbb E\!\left[\bigl(A_{\pi^\star}(x)-B(x)\bigr)_+^2\right]
-\]
-
-is identically zero whenever the certificate layer succeeds.
+where \(\mathrm{sg}[\cdot]\) denotes the stop-gradient operator.
+This ensures gradients flow only through the uncertified proposal
+\(q_\Theta\), treating the certified boundary as a fixed constraint
+envelope.  Gradients through \(\pi^\star\) would pull the projection
+layer's Lagrange multiplier in the opposite direction, weakening the
+constraint — exactly what the penalty is designed to prevent.
 
 ## 4. Proposal Learning
 

@@ -195,7 +195,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             old_values.append(out.value.detach())
             rewards.append(reward)
             entropies.append(dist.entropy())
-            kl_terms.append(self.loss_fn.policy_kl(out.pi, out.p_cert))
+            kl_terms.append(self.loss_fn.policy_kl(out.pi.detach(), out.p_proposal))
 
         rewards_t = torch.stack(rewards, dim=0)
         values_t = torch.stack(values, dim=0)
@@ -266,7 +266,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 certificate_loss = self.loss_fn.certificate_penalty(out_eval.diagnostics)
                 correction_loss = self.loss_fn.correction_size_penalty(out_eval.diagnostics)
                 entropy_loss = dist_eval.entropy().mean()
-                kl_loss_dynamic = self.loss_fn.policy_kl(out_eval.pi, out_eval.p_cert)
+                kl_loss_dynamic = self.loss_fn.policy_kl(out_eval.pi.detach(), out_eval.p_proposal)
                 self.epoch_kl_records.append(kl_loss_dynamic.detach().cpu().item())
 
                 epoch = int(getattr(self.trainer, "current_epoch", 0))
@@ -282,7 +282,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                     + self.loss_fn.omega_usage * usage_loss
                     + self.loss_fn.omega_certificate * certificate_loss
                     + self.loss_fn.omega_correction * correction_loss
-                    + supervised_weight * self.current_kl_weight * kl_loss_dynamic
+                    + self.current_kl_weight * kl_loss_dynamic
                     - entropy_weight * entropy_loss
                 )
                 self.manual_backward(total_loss)
@@ -337,7 +337,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 + self.loss_fn.omega_usage * usage_loss
                 + self.loss_fn.omega_certificate * certificate_loss
                 + self.loss_fn.omega_correction * correction_loss
-                + supervised_weight * self.current_kl_weight * kl_loss
+                + self.current_kl_weight * kl_loss
                 - entropy_weight * entropy_loss
             )
 
