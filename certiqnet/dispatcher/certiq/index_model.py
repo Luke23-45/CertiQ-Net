@@ -145,7 +145,7 @@ class CertiQIndexModel(nn.Module):
         else:
             raise ValueError(f"Unknown cost_fn: {self.cost_fn}")
         cost_min = cost.min(dim=-1).values
-        budget = torch.median(cost, dim=-1).values + self.C
+        budget = cost.min(dim=-1).values + self.C
         p_cert = normalize_policy(torch.softmax(-cost / self.tau, dim=-1))
 
         learned_logits, value = self.index_head(Q, mu_b, xi)

@@ -152,7 +152,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         if hasattr(self.model, "reset_dispatch_state"):
             self.model.reset_dispatch_state()
         expert_action = self._collect_expert_actions(Q0, mu0)
-        init_out = self.model.forward_full(Q0, mu0, xi0, certify=False, training_mode=True)
+        init_out = self.model.forward_full(Q0, mu0, xi0, certify=True, training_mode=True)
         expert_pi = F.one_hot(expert_action, num_classes=int(Q0.shape[-1])).to(
             device=init_out.pi.device,
             dtype=init_out.pi.dtype,
@@ -180,7 +180,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             mu_obs = mu0
             xi_obs = xi0
             Q_obs, mu_obs, xi_obs = self._make_observation(Q_obs, mu_obs, xi_obs)
-            out = self.model.forward_full(Q_obs, mu_obs, xi_obs, certify=False, training_mode=True)
+            out = self.model.forward_full(Q_obs, mu_obs, xi_obs, certify=True, training_mode=True)
             dist = Categorical(probs=out.pi)
             action_idx = dist.sample()
             actions_list.append(action_idx)
@@ -212,7 +212,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         gae_lambda = 0.95
         with torch.no_grad():
             final_Q = env.Q.clone()
-            final_out = self.model.forward_full(final_Q, mu0, xi0, certify=False, training_mode=True)
+            final_out = self.model.forward_full(final_Q, mu0, xi0, certify=True, training_mode=True)
             final_val = final_out.value.detach()
         advantages = torch.zeros_like(rewards_t)
         gae = torch.zeros_like(rewards_t[0])
@@ -240,7 +240,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 opt.zero_grad()
                 flat_mu = mu0.repeat(self.rollout_horizon, 1)
                 flat_xi = xi0.repeat(self.rollout_horizon, 1) if xi0 is not None else None
-                out_eval = self.model.forward_full(flat_Q, flat_mu, flat_xi, certify=False, training_mode=True)
+                out_eval = self.model.forward_full(flat_Q, flat_mu, flat_xi, certify=True, training_mode=True)
                 dist_eval = Categorical(probs=out_eval.pi)
                 new_log_probs = dist_eval.log_prob(actions_t.reshape(-1))
                 new_values = out_eval.value.reshape(-1)
@@ -256,10 +256,14 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                     returns.reshape(-1),
                     self.ppo_clip_epsilon,
                 )
-                curr_init_out = self.model.forward_full(Q0, mu0, xi0, certify=False, training_mode=True)
-                bc_loss = self.loss_fn.bc_loss(curr_init_out.pi, expert_pi)
-                action_loss = self.loss_fn.action_loss(curr_init_out.proposal_logits, target_action)
-                margin_loss = self.loss_fn.margin_loss(curr_init_out.proposal_logits, target_action)
+                # Compute imitation targets on diverse rollout states (not Q0)
+                flat_expert_action = self._collect_expert_actions(flat_Q, flat_mu)
+                flat_expert_pi = F.one_hot(flat_expert_action, num_classes=int(flat_Q.shape[-1])).to(
+                    device=out_eval.pi.device, dtype=out_eval.pi.dtype,
+                )
+                bc_loss = self.loss_fn.bc_loss(out_eval.pi, flat_expert_pi)
+                action_loss = self.loss_fn.action_loss(out_eval.proposal_logits, flat_expert_action)
+                margin_loss = self.loss_fn.margin_loss(out_eval.proposal_logits, flat_expert_action)
                 usage_loss = self.loss_fn.usage_penalty(out_eval.diagnostics.usage_final)
                 certificate_loss = self.loss_fn.certificate_penalty(out_eval.diagnostics)
                 correction_loss = self.loss_fn.correction_size_penalty(out_eval.diagnostics)
