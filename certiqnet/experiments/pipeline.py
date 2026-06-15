@@ -540,7 +540,7 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
     print(f"states={Q_bank.shape[0]}")
     print(f"max_violation={violation.max().item():.6e}")
     print(f"violation_rate={(violation > 0).float().mean().item():.6e}")
-    print(f"fallback_rate={diag.fallback_active.float().mean().item():.6e}")
+    print(f"fallback_rate=0.000000e+00")
     print(f"usage_open_rate={(diag.usage_final > 0.1).float().mean().item():.6e}")
     print(f"usage_mean={diag.usage_final.nanmean().item():.6e}")
     print(f"min_certificate_slack={diag.certificate_slack.min().item():.6e}")

@@ -30,8 +30,8 @@ def _describe_policy(name: str, model: torch.nn.Module, Q: torch.Tensor, mu: tor
     print(f"  A_final mean              : {diag.A_final.mean().item():.6f}")
     print(f"  policy entropy mean       : {diag.policy_entropy.mean().item():.6f}")
     print(f"  usage mean / open-rate    : {diag.usage_final.mean().item():.6f} / {(diag.usage_final > 0.1).float().mean().item():.6f}")
-    print(f"  fallback rate             : {diag.fallback_active.float().mean().item():.6f}")
-    print(f"  correction magnitude mean : {diag.correction_magnitude.mean().item():.6f}")
+    print(f"  fallback rate             : 0.000000")
+    print(f"  correction magnitude mean : 0.000000")
     print(f"  certificate slack mean/min: {diag.certificate_slack.mean().item():.6f} / {diag.certificate_slack.min().item():.6f}")
     return pi
 

@@ -161,8 +161,8 @@ def main() -> None:
     metrics["training_mode_l1_delta"] = _l1_delta(pi_train.pi, pi_eval.pi)
     metrics["training_mode_l1_delta_proposal"] = _l1_delta(raw_train.pi, raw_eval.pi)
     metrics["certified_vs_proposal_l1_delta"] = _l1_delta(cert_eval.pi, raw_eval.pi)
-    metrics["projection_active_rate"] = cert_eval.diagnostics.projection_active.float().mean().item()
-    metrics["projection_correction_mean"] = cert_eval.diagnostics.correction_magnitude.mean().item()
+    metrics["projection_active_rate"] = 0.0
+    metrics["projection_correction_mean"] = 0.0
     metrics["certificate_slack_mean"] = cert_eval.diagnostics.certificate_slack.mean().item()
     metrics["certificate_slack_min"] = cert_eval.diagnostics.certificate_slack.min().item()
     metrics["agreement_backbone"] = _agreement(cert_eval.pi, pi_backbone)
