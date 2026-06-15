@@ -51,6 +51,12 @@ class TrainerConfig:
     ppo_epochs: int = 4
     ppo_batch_size: int = 64
     ppo_manual_clip_val: float = 1.0
+    dual_lambda_lr: float = 0.01
+    dual_lambda_init: float = 0.0
+    dual_lambda_momentum: float = 0.9
+    dual_lr_warmup_steps: int = 100
+    dual_lambda_max: float = 10.0
+    dual_lr_decay: float = 1.0
 
 
 @dataclass
@@ -59,8 +65,6 @@ class LossConfig:
     omega_action: float = 1.5
     omega_margin: float = 0.1
     omega_usage: float = 0.1
-    omega_certificate: float = 5.0
-    omega_correction: float = 0.01
     omega_ent: float = 0.0
     rollout_weight: float = 1.0
     policy_kl_weight: float = 0.05

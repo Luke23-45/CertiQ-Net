@@ -7,28 +7,24 @@ from torch import Tensor
 
 @dataclass(frozen=True)
 class DispatcherDiagnostics:
-    """Auditable certificate and proposal diagnostics for one forward pass."""
+    """Diagnostics for one forward pass (constraint-violation fields are
+    for logging / monitoring only — the Lagrangian dual variable is
+    managed by the training module, not produced by the model)."""
 
-    A_cert: Tensor
     A_proposal: Tensor
     A_final: Tensor
     m_Q: Tensor
     B_Q: Tensor
     certificate_slack: Tensor
+    constraint_violation: Tensor
     usage_raw: Tensor
     usage_final: Tensor
     usage_cap: Tensor
-    fallback_active: Tensor
-    correction_magnitude: Tensor
     policy_entropy: Tensor
     selected_resource: Tensor
     pressure_mean: Tensor
     pressure_max: Tensor
     pressure_update_norm: Tensor
-    projection_nu: Tensor
-    projection_active: Tensor
-    proposal_slack: Tensor
-    solver_status: Tensor
 
 
 @dataclass(frozen=True)

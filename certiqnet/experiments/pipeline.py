@@ -265,8 +265,6 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             omega_action=float(cfg.loss.get("omega_action", 1.5)),
             omega_margin=float(cfg.loss.get("omega_margin", 0.1)),
             omega_usage=float(cfg.loss.omega_usage),
-            omega_certificate=float(cfg.loss.omega_certificate),
-            omega_correction=float(cfg.loss.omega_correction),
             rollout_weight=float(cfg.loss.rollout_weight),
             policy_kl_weight=float(cfg.loss.policy_kl_weight),
             value_weight=float(cfg.loss.value_weight),
@@ -292,6 +290,12 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             initial_policy_kl_weight=float(getattr(cfg.trainer, "initial_policy_kl_weight", 0.05)),
             entropy_weight=float(cfg.loss.entropy_weight),
             lam=float(cfg.env.lam),
+            dual_lambda_lr=float(getattr(cfg.trainer, "dual_lambda_lr", 0.01)),
+            dual_lambda_init=float(getattr(cfg.trainer, "dual_lambda_init", 0.0)),
+            dual_lambda_momentum=float(getattr(cfg.trainer, "dual_lambda_momentum", 0.9)),
+            dual_lr_warmup_steps=int(getattr(cfg.trainer, "dual_lr_warmup_steps", 100)),
+            dual_lambda_max=float(getattr(cfg.trainer, "dual_lambda_max", 10.0)),
+            dual_lr_decay=float(getattr(cfg.trainer, "dual_lr_decay", 1.0)),
         )
 
         if adapter_name == "QueueingAdapter":
@@ -516,7 +520,7 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
     with torch.no_grad():
         if hasattr(model, "reset_dispatch_state"):
             model.reset_dispatch_state()
-        _, diag = model(Q_bank, mu_bank, xi_bank, certify=True, training_mode=False)
+        _, diag = model(Q_bank, mu_bank, xi_bank, training_mode=False)
 
     violation = (diag.A_final - diag.B_Q).clamp(min=0.0)
     audit_metrics = aggregate_metrics(

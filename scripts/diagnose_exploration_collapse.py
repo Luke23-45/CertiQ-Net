@@ -104,7 +104,6 @@ def _perturbed_policy(
     Q: torch.Tensor,
     mu: torch.Tensor,
     *,
-    certify: bool,
     training_mode: bool,
     perturb_scale: float,
 ) -> torch.Tensor:
@@ -113,7 +112,7 @@ def _perturbed_policy(
     col = torch.randint(0, Q.shape[1], (Q.shape[0],))
     Q_pert[row, col] = Q_pert[row, col] + perturb_scale
     with torch.no_grad():
-        return model.forward_full(Q_pert, mu, certify=certify, training_mode=training_mode).pi
+        return model.forward_full(Q_pert, mu, training_mode=training_mode).pi
 
 
 def main() -> None:
@@ -138,10 +137,8 @@ def main() -> None:
     mu_b = mu.unsqueeze(0).expand(Q.shape[0], -1)
 
     with torch.no_grad():
-        cert_train = model.forward_full(Q, mu_b, certify=True, training_mode=True)
-        cert_eval = model.forward_full(Q, mu_b, certify=True, training_mode=False)
-        raw_train = model.forward_full(Q, mu_b, certify=False, training_mode=True)
-        raw_eval = model.forward_full(Q, mu_b, certify=False, training_mode=False)
+        pi_train = model.forward_full(Q, mu_b, training_mode=True)
+        pi_eval = model.forward_full(Q, mu_b, training_mode=False)
 
     backbone = AnalyticBackbonePolicy(N=N, beta=float(getattr(model, "beta", 1.0)), C=float(getattr(model, "C", float("inf"))))
     sed = ShortestExpectedDelay(N=N, beta=float(getattr(model, "beta", 1.0)), C=float(getattr(model, "C", float("inf"))))
@@ -151,27 +148,17 @@ def main() -> None:
         pi_sed, _ = sed(Q, mu_b, training_mode=False)
         pi_qmd, _ = qmd(Q, mu_b, training_mode=False)
 
-    pert_cert = _perturbed_policy(
+    pert = _perturbed_policy(
         model,
         Q,
         mu_b,
-        certify=True,
-        training_mode=False,
-        perturb_scale=args.perturb_scale,
-    )
-    pert_raw = _perturbed_policy(
-        model,
-        Q,
-        mu_b,
-        certify=False,
         training_mode=False,
         perturb_scale=args.perturb_scale,
     )
 
     metrics: dict[str, float] = {}
-    metrics.update(_stats("certified", cert_eval.pi, draws=args.draws))
-    metrics.update(_stats("proposal", raw_eval.pi, draws=args.draws))
-    metrics["training_mode_l1_delta_certified"] = _l1_delta(cert_train.pi, cert_eval.pi)
+    metrics.update(_stats("policy", pi_eval.pi, draws=args.draws))
+    metrics["training_mode_l1_delta"] = _l1_delta(pi_train.pi, pi_eval.pi)
     metrics["training_mode_l1_delta_proposal"] = _l1_delta(raw_train.pi, raw_eval.pi)
     metrics["certified_vs_proposal_l1_delta"] = _l1_delta(cert_eval.pi, raw_eval.pi)
     metrics["projection_active_rate"] = cert_eval.diagnostics.projection_active.float().mean().item()
@@ -179,30 +166,19 @@ def main() -> None:
     metrics["certificate_slack_mean"] = cert_eval.diagnostics.certificate_slack.mean().item()
     metrics["certificate_slack_min"] = cert_eval.diagnostics.certificate_slack.min().item()
     metrics["agreement_backbone"] = _agreement(cert_eval.pi, pi_backbone)
-    metrics["agreement_sed"] = _agreement(cert_eval.pi, pi_sed)
-    metrics["agreement_qmd"] = _agreement(cert_eval.pi, pi_qmd)
-    metrics["proposal_agreement_sed"] = _agreement(raw_eval.pi, pi_sed)
-    metrics["proposal_agreement_qmd"] = _agreement(raw_eval.pi, pi_qmd)
-    metrics["perturb_flip_rate_certified"] = _flip_rate(cert_eval.pi, pert_cert)
-    metrics["perturb_flip_rate_proposal"] = _flip_rate(raw_eval.pi, pert_raw)
+    metrics["agreement_sed"] = _agreement(pi_eval.pi, pi_sed)
+    metrics["agreement_qmd"] = _agreement(pi_eval.pi, pi_qmd)
+    metrics["perturb_flip_rate"] = _flip_rate(pi_eval.pi, pert)
 
     red_flags: list[str] = []
-    if metrics["certified.entropy_mean"] < 0.5:
-        red_flags.append("low certified entropy")
-    if metrics["proposal.entropy_mean"] < 0.5:
-        red_flags.append("low proposal entropy")
+    if metrics.get("policy.entropy_mean", 1.0) < 0.5:
+        red_flags.append("low policy entropy")
     if metrics["agreement_qmd"] > 0.9 or metrics["agreement_sed"] > 0.9:
         red_flags.append("policy still tracks a heuristic")
-    if metrics["training_mode_l1_delta_certified"] < 1e-8:
+    if metrics["training_mode_l1_delta"] < 1e-8:
         red_flags.append("training_mode does not alter the policy")
-    if metrics["training_mode_l1_delta_proposal"] < 1e-8:
-        red_flags.append("training_mode does not alter the proposal policy")
-    if metrics["certified_vs_proposal_l1_delta"] < 1e-8:
-        red_flags.append("certification barely changes the policy")
-    if metrics["perturb_flip_rate_certified"] < 0.05:
+    if metrics["perturb_flip_rate"] < 0.05:
         red_flags.append("policy is state-insensitive under unit perturbations")
-    if metrics["projection_active_rate"] < 0.05:
-        red_flags.append("certificate projection rarely activates")
 
     print("=== Exploration Collapse Diagnostic ===")
     print(f"run_dir: {args.run_dir}")

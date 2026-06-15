@@ -31,10 +31,7 @@ def _stack_mean(diags: list[DispatcherDiagnostics]) -> DispatcherDiagnostics:
         if tensors[0].dtype == torch.bool:
             values[name] = torch.stack(tensors, dim=0).any(dim=0)
         elif tensors[0].dtype in {torch.int32, torch.int64, torch.long}:
-            if name == "solver_status":
-                values[name] = torch.stack(tensors, dim=0).max(dim=0).values
-            else:
-                values[name] = tensors[-1]
+            values[name] = tensors[-1]
         else:
             values[name] = torch.stack(tensors, dim=0).mean(dim=0).detach()
     return DispatcherDiagnostics(**values)
@@ -67,6 +64,12 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         initial_policy_kl_weight: float = 0.05,
         entropy_weight: float = 0.01,
         lam: float = 1.0,
+        dual_lambda_lr: float = 0.01,
+        dual_lambda_init: float = 0.0,
+        dual_lambda_momentum: float = 0.9,
+        dual_lr_warmup_steps: int = 100,
+        dual_lambda_max: float = 10.0,
+        dual_lr_decay: float = 1.0,
     ) -> None:
         super().__init__()
         self.model = model
@@ -87,6 +90,14 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self.ppo_clip_epsilon = float(ppo_clip_epsilon)
         self.entropy_weight = float(entropy_weight)
         self.lam = float(lam)
+        self.dual_lambda_lr = float(dual_lambda_lr)
+        self.dual_lambda_momentum = float(dual_lambda_momentum)
+        self.dual_lr_warmup_steps = int(dual_lr_warmup_steps)
+        self.dual_lambda_max = float(dual_lambda_max)
+        self.dual_lr_decay = float(dual_lr_decay)
+        self.register_buffer("dual_lambda", torch.tensor(float(dual_lambda_init)))
+        self.register_buffer("_smoothed_residual", torch.tensor(0.0))
+        self.register_buffer("_dual_update_count", torch.tensor(0, dtype=torch.long))
         if self.use_ppo:
             self.automatic_optimization = False
             self._gradient_clip_val = float(ppo_manual_clip_val)
@@ -150,7 +161,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         if hasattr(self.model, "reset_dispatch_state"):
             self.model.reset_dispatch_state()
         expert_action = self._collect_expert_actions(Q0, mu0)
-        init_out = self.model.forward_full(Q0, mu0, xi0, certify=True, training_mode=True)
+        init_out = self.model.forward_full(Q0, mu0, xi0, training_mode=True)
         expert_pi = F.one_hot(expert_action, num_classes=int(Q0.shape[-1])).to(
             device=init_out.pi.device,
             dtype=init_out.pi.dtype,
@@ -178,7 +189,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             mu_obs = mu0
             xi_obs = xi0
             Q_obs, mu_obs, xi_obs = self._make_observation(Q_obs, mu_obs, xi_obs)
-            out = self.model.forward_full(Q_obs, mu_obs, xi_obs, certify=True, training_mode=True)
+            out = self.model.forward_full(Q_obs, mu_obs, xi_obs, training_mode=True)
             dist = Categorical(probs=out.pi)
             action_idx = dist.sample()
             actions_list.append(action_idx)
@@ -210,7 +221,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         gae_lambda = 0.95
         with torch.no_grad():
             final_Q = env.Q.clone()
-            final_out = self.model.forward_full(final_Q, mu0, xi0, certify=True, training_mode=True)
+            final_out = self.model.forward_full(final_Q, mu0, xi0, training_mode=True)
             final_val = final_out.value.detach()
         advantages = torch.zeros_like(rewards_t)
         gae = torch.zeros_like(rewards_t[0])
@@ -227,6 +238,37 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
 
         rollout_diag = _stack_mean(policy_diagnostics)
 
+        # Dual variable update (adaptive: momentum + warmup + decay + max cap)
+        residual = rollout_diag.A_final.mean() - rollout_diag.B_Q.mean()
+        epoch = int(getattr(self.trainer, "current_epoch", 0))
+        rl_start = self.imitation_warmup_epochs + self.critic_bootstrap_epochs
+        if epoch >= rl_start:
+            with torch.no_grad():
+                # Effective LR with warmup
+                warmup_progress = self._dual_update_count.float() / max(1, self.dual_lr_warmup_steps)
+                effective_lr = self.dual_lambda_lr * min(1.0, warmup_progress)
+                # Multiplicative decay after warmup
+                effective_lr *= self.dual_lr_decay ** self._dual_update_count.float()
+                # Optional EMA smoothing of the residual
+                if self.dual_lambda_momentum > 0:
+                    self._smoothed_residual.mul_(self.dual_lambda_momentum)
+                    self._smoothed_residual.add_(residual, alpha=1.0 - self.dual_lambda_momentum)
+                    update_residual = self._smoothed_residual
+                else:
+                    update_residual = residual
+                # Dual step
+                self.dual_lambda.add_(effective_lr * update_residual)
+                self.dual_lambda.clamp_(min=0.0, max=self.dual_lambda_max)
+                self._dual_update_count.add_(1)
+
+        # Log constraint metrics (signed residual, positive violation, dual)
+        violation_amount = rollout_diag.constraint_violation.mean()
+        violation_rate = (rollout_diag.constraint_violation > 0).float().mean()
+        self.log("constraint_residual", residual, on_step=True, on_epoch=True)
+        self.log("constraint_violation", violation_amount, on_step=True, on_epoch=True)
+        self.log("constraint_violation_rate", violation_rate, on_step=True, on_epoch=True)
+        self.log("dual_lambda", self.dual_lambda, on_step=True, on_epoch=True)
+
         if self.use_ppo:
             opt = self.optimizers()
             ppo_epochs = self.ppo_epochs
@@ -238,7 +280,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 opt.zero_grad()
                 flat_mu = mu0.repeat(self.rollout_horizon, 1)
                 flat_xi = xi0.repeat(self.rollout_horizon, 1) if xi0 is not None else None
-                out_eval = self.model.forward_full(flat_Q, flat_mu, flat_xi, certify=True, training_mode=True)
+                out_eval = self.model.forward_full(flat_Q, flat_mu, flat_xi, training_mode=True)
                 dist_eval = Categorical(probs=out_eval.pi)
                 new_log_probs = dist_eval.log_prob(actions_t.reshape(-1))
                 new_values = out_eval.value.reshape(-1)
@@ -262,15 +304,16 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 bc_loss = self.loss_fn.bc_loss(out_eval.pi, flat_expert_pi)
                 action_loss = self.loss_fn.action_loss(out_eval.proposal_logits, flat_expert_action)
                 margin_loss = self.loss_fn.margin_loss(out_eval.proposal_logits, flat_expert_action)
-                usage_loss = self.loss_fn.usage_penalty(out_eval.diagnostics.usage_final)
-                certificate_loss = self.loss_fn.certificate_penalty(out_eval.diagnostics)
-                correction_loss = self.loss_fn.correction_size_penalty(out_eval.diagnostics)
+                residual = out_eval.diagnostics.A_final - out_eval.diagnostics.B_Q
+                constraint_loss = self.loss_fn.constraint_loss(
+                    residual,
+                    self.dual_lambda,
+                ) if epoch >= rl_start else torch.zeros((), device=out_eval.pi.device)
                 entropy_loss = dist_eval.entropy().mean()
                 kl_loss_dynamic = self.loss_fn.policy_kl(out_eval.pi.detach(), out_eval.p_proposal)
                 self.epoch_kl_records.append(kl_loss_dynamic.detach().cpu().item())
 
-                epoch = int(getattr(self.trainer, "current_epoch", 0))
-                is_actor_active = (epoch >= self.imitation_warmup_epochs + self.critic_bootstrap_epochs)
+                is_actor_active = (epoch >= rl_start)
                 effective_actor_weight = self.loss_fn.rollout_weight if is_actor_active else 0.0
 
                 total_loss = (
@@ -279,9 +322,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                     + imitation_weight * bc_loss
                     + supervised_weight * self.loss_fn.omega_action * action_loss
                     + supervised_weight * self.loss_fn.omega_margin * margin_loss
-                    + self.loss_fn.omega_usage * usage_loss
-                    + self.loss_fn.omega_certificate * certificate_loss
-                    + self.loss_fn.omega_correction * correction_loss
+                    + constraint_loss
                     + self.current_kl_weight * kl_loss_dynamic
                     - entropy_weight * entropy_loss
                 )
@@ -293,6 +334,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             self.log("actor", actor_loss, on_step=True, on_epoch=True)
             self.log("critic", critic_loss, on_step=True, on_epoch=True)
             self.log("bc", bc_loss, on_step=True, on_epoch=True)
+            self.log("constraint_loss", constraint_loss, on_step=True, on_epoch=True)
             self.log("total", total_loss, on_step=True, on_epoch=True, prog_bar=True)
             self._log_diagnostics(rollout_diag, "train")
 
@@ -305,9 +347,11 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 target_action = expert_action
             action_loss = self.loss_fn.action_loss(init_out.proposal_logits, target_action)
             margin_loss = self.loss_fn.margin_loss(init_out.proposal_logits, target_action)
-            usage_loss = self.loss_fn.usage_penalty(rollout_diag.usage_final)
-            certificate_loss = self.loss_fn.certificate_penalty(rollout_diag)
-            correction_loss = self.loss_fn.correction_size_penalty(rollout_diag)
+            c_residual = init_out.diagnostics.A_final - init_out.diagnostics.B_Q
+            constraint_loss = self.loss_fn.constraint_loss(
+                c_residual,
+                self.dual_lambda,
+            ) if epoch >= rl_start else torch.zeros((), device=init_out.pi.device)
             entropy_loss = entropies_t.mean()
 
             losses = {
@@ -316,16 +360,13 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 "bc": bc_loss,
                 "action": action_loss,
                 "margin": margin_loss,
-                "usage": usage_loss,
-                "certificate": certificate_loss,
-                "correction": correction_loss,
+                "constraint": constraint_loss,
                 "kl": kl_loss,
                 "entropy": entropy_loss,
             }
             
             self.epoch_kl_records.append(kl_loss.detach().cpu().item())
-            epoch = int(getattr(self.trainer, "current_epoch", 0))
-            is_actor_active = (epoch >= self.imitation_warmup_epochs + self.critic_bootstrap_epochs)
+            is_actor_active = (epoch >= rl_start)
             effective_actor_weight = self.loss_fn.rollout_weight if is_actor_active else 0.0
 
             losses["total"] = (
@@ -334,9 +375,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 + imitation_weight * bc_loss
                 + supervised_weight * self.loss_fn.omega_action * action_loss
                 + supervised_weight * self.loss_fn.omega_margin * margin_loss
-                + self.loss_fn.omega_usage * usage_loss
-                + self.loss_fn.omega_certificate * certificate_loss
-                + self.loss_fn.omega_correction * correction_loss
+                + constraint_loss
                 + self.current_kl_weight * kl_loss
                 - entropy_weight * entropy_loss
             )
@@ -392,7 +431,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 mu_obs = mu
                 xi_obs = xi
                 Q_obs, mu_obs, xi_obs = self._make_observation(Q_obs, mu_obs, xi_obs)
-                out = self.model.forward_full(Q_obs, mu_obs, xi_obs, certify=True, training_mode=False)
+                out = self.model.forward_full(Q_obs, mu_obs, xi_obs, training_mode=False)
                 action_idx = out.pi.argmax(dim=-1)
                 action_pi = F.one_hot(action_idx, num_classes=int(Q.shape[-1])).float()
                 step = env.step(action_pi)
@@ -406,9 +445,9 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         dt_t = torch.cat(dt_trace, dim=0).float()
         avg_cost = self.loss_fn.rollout_cost(cost_t, dt_t)
         p95_backlog = backlog.quantile(0.95)
-        violation = (diag.certificate_slack.min() < -1e-4).float()
+        violation = (diag.constraint_violation.mean() > 1e-4).float()
         selection_score = validation_selection_score(violation, avg_cost, p95_backlog)
-        self.log("val/CERTIFICATE_VIOLATION", violation, prog_bar=True)
+        self.log("val/CONSTRAINT_VIOLATION", violation, prog_bar=True)
         self.log("val/avg_cost", avg_cost, prog_bar=True)
         self.log("val/p95_backlog", p95_backlog, prog_bar=False)
         self.log("val/selection_score", selection_score, prog_bar=False)
@@ -417,19 +456,16 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
     # ── Diagnostics logging ────────────────────────────────────────
 
     def _log_diagnostics(self, diag: DispatcherDiagnostics, stage: str) -> None:
-        self.log(f"{stage}/A_cert", diag.A_cert.mean())
-        self.log(f"{stage}/A_proposal", diag.A_proposal.mean())
         self.log(f"{stage}/A_final", diag.A_final.mean())
         self.log(f"{stage}/m_Q", diag.m_Q.mean())
         self.log(f"{stage}/B_Q", diag.B_Q.mean())
         self.log(f"{stage}/certificate_slack_min", diag.certificate_slack.min())
         self.log(f"{stage}/certificate_slack_mean", diag.certificate_slack.mean())
+        self.log(f"{stage}/constraint_violation", diag.constraint_violation.mean())
         self.log(f"{stage}/usage_raw", diag.usage_raw.nanmean())
         self.log(f"{stage}/usage_final", diag.usage_final.nanmean())
         self.log(f"{stage}/usage_open_rate", (diag.usage_final > 0.1).float().mean())
         self.log(f"{stage}/usage_cap", diag.usage_cap.nanmean())
-        self.log(f"{stage}/fallback_rate", diag.fallback_active.float().mean())
-        self.log(f"{stage}/correction_magnitude", diag.correction_magnitude.mean())
         self.log(f"{stage}/policy_entropy", diag.policy_entropy.mean())
         self.log(f"{stage}/pressure_mean", diag.pressure_mean.mean())
         self.log(f"{stage}/pressure_max", diag.pressure_max.mean())

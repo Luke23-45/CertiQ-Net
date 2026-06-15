@@ -41,8 +41,6 @@ model:
         omega_action: 1.5
         omega_margin: 0.1
         omega_usage: 0.1
-        omega_certificate: 5.0
-        omega_correction: 0.01
         rollout_weight: 1.0
         policy_kl_weight: 0.05
         value_weight: 1.0

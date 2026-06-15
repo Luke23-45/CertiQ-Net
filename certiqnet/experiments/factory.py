@@ -110,5 +110,7 @@ def build_model(cfg: DictConfig, N: int, d_xi: int = 0) -> torch.nn.Module:
             num_heads=int(model_data.get("num_heads", 4)),
             num_inducing_points=int(model_data.get("num_inducing_points", 4)),
             dropout=float(model_data.get("dropout", 0.0)),
+            cost_fn=str(model_data.get("cost_fn", "sed")),
+            cost_learner_hidden_dim=int(model_data.get("cost_learner_hidden_dim", 64)),
         )
     raise ValueError(f"Unsupported model target: {target}")

@@ -1,15 +1,13 @@
-"""Training loss components for CertiQ‑Net."""
+"""Training loss components for CertiQ‑Net (PPO-Lagrangian)."""
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch import nn
 
-from certiqnet.dispatcher.types import DispatcherDiagnostics
-
 
 class CertiQNetLoss(nn.Module):
-    """Total loss with individually logged z3 dispatcher components.
+    """Total loss with individually logged components.
 
     Parameters are exposed as individual ``__init__`` arguments so that
     ``LightningCLI`` can inject them via ``class_path`` / ``init_args``.
@@ -21,8 +19,6 @@ class CertiQNetLoss(nn.Module):
         omega_action: float = 1.5,
         omega_margin: float = 0.1,
         omega_usage: float = 0.1,
-        omega_certificate: float = 5.0,
-        omega_correction: float = 0.01,
         rollout_weight: float = 1.0,
         policy_kl_weight: float = 0.05,
         value_weight: float = 1.0,
@@ -33,8 +29,6 @@ class CertiQNetLoss(nn.Module):
         self.omega_action = omega_action
         self.omega_margin = omega_margin
         self.omega_usage = omega_usage
-        self.omega_certificate = omega_certificate
-        self.omega_correction = omega_correction
         self.rollout_weight = rollout_weight
         self.policy_kl_weight = policy_kl_weight
         self.value_weight = value_weight
@@ -69,11 +63,15 @@ class CertiQNetLoss(nn.Module):
     def usage_penalty(self, usage: Tensor) -> Tensor:
         return (1.0 - usage).square().mean()
 
-    def certificate_penalty(self, diag: DispatcherDiagnostics) -> Tensor:
-        return (diag.A_proposal - diag.B_Q).clamp(min=0.0).square().mean()
+    def constraint_loss(self, residual: Tensor, dual_lambda: Tensor) -> Tensor:
+        """Lagrangian primal penalty λ · g(θ) where g(θ) = E[C] - d.
 
-    def correction_size_penalty(self, diag: DispatcherDiagnostics) -> Tensor:
-        return diag.correction_magnitude.square().mean()
+        ``residual`` is the **signed** constraint residual (positive when
+        over-budget).  Clamping is performed inside the dual update, not
+        here, so the primal receives the correct gradient direction even
+        when the constraint is satisfied.
+        """
+        return (dual_lambda.detach() * residual).mean()
 
     def entropy_term(self, pi: Tensor) -> Tensor:
         return -(pi * pi.clamp_min(1e-8).log()).sum(dim=-1).mean()
@@ -114,8 +112,9 @@ class CertiQNetLoss(nn.Module):
     def forward(
         self,
         pi: Tensor,
-        diag: DispatcherDiagnostics,
         *,
+        residual: Tensor | None = None,
+        dual_lambda: Tensor | None = None,
         imitation_target: Tensor | None = None,
         action_target: Tensor | None = None,
         ref_pi: Tensor | None = None,
@@ -136,10 +135,11 @@ class CertiQNetLoss(nn.Module):
         if policy_logits is not None:
             L_action = self.action_loss(policy_logits, action_target)
             L_margin = self.margin_loss(policy_logits, action_target)
-        L_usage = self.usage_penalty(diag.usage_final)
-        L_certificate = self.certificate_penalty(diag)
-        L_correction = self.correction_size_penalty(diag)
+        L_usage = torch.zeros((), device=pi.device, dtype=pi.dtype)
         L_ent = self.entropy_term(pi)
+        L_constraint = torch.zeros((), device=pi.device, dtype=pi.dtype)
+        if residual is not None and dual_lambda is not None:
+            L_constraint = self.constraint_loss(residual, dual_lambda)
         L_kl = torch.zeros((), device=pi.device, dtype=pi.dtype)
         if ref_pi is not None:
             L_kl = self.policy_kl(pi, ref_pi)
@@ -166,8 +166,7 @@ class CertiQNetLoss(nn.Module):
             + self.omega_action * L_action
             + self.omega_margin * L_margin
             + self.omega_usage * L_usage
-            + self.omega_certificate * L_certificate
-            + self.omega_correction * L_correction
+            + L_constraint
             - ent_w * L_ent
             + self.policy_kl_weight * L_kl
             + self.value_weight * L_critic
@@ -180,8 +179,7 @@ class CertiQNetLoss(nn.Module):
             "action": L_action,
             "margin": L_margin,
             "usage": L_usage,
-            "certificate": L_certificate,
-            "correction": L_correction,
+            "constraint": L_constraint,
             "kl": L_kl,
             "entropy": L_ent,
         }

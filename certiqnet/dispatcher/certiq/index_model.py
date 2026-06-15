@@ -1,4 +1,4 @@
-"""CertiQ index model for marginal-cost dispatch with KL projection."""
+"""CertiQ index model for marginal-cost dispatch with PPO-Lagrangian constraint."""
 
 from __future__ import annotations
 
@@ -6,14 +6,9 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from certiqnet.dispatcher.certiq.certificate import (
-    DifferentiableKLProjection,
-    arrival_coordinate,
-    normalize_policy,
-    policy_entropy,
-)
 from certiqnet.dispatcher.delay_geometry import sed_index, quadratic_drift_index
 from certiqnet.dispatcher.certiq.interaction import DispatchInteractionEncoder, index_token_features
+from certiqnet.dispatcher.certiq.cost_learner import CostLearner
 from certiqnet.dispatcher.types import DispatcherDiagnostics, DispatcherForward
 
 
@@ -76,20 +71,24 @@ class MarginalIndexHead(nn.Module):
 
 
 class CertiQIndexModel(nn.Module):
-    """Dispatch by learned marginal cost index with KL projection.
+    """Dispatch by learned marginal cost index with PPO-Lagrangian constraint.
 
     The forward pass:
 
         1. Compute a per-resource **cost** (delay proxy, default SED).
         2. Compute the certificate envelope ``budget = min_i cost_i + C``.
         3. Produce raw **logits** from the learned encoder + index head.
-        4. Apply the differentiable KL projection to obtain the final
-           routing distribution ``pi``, which satisfies
-           ``E_pi[cost] <= budget``.
+        4. Output ``pi = softmax(logits / tau)`` — the policy is a plain
+           softmax.  The budget constraint is enforced by the Lagrangian
+           loss during training, not by a hard projection at forward time.
 
-    The projection layer uses implicit differentiation so that gradients
-    flow end-to-end from ``pi`` back to the encoder parameters, exactly
-    as in OptNet / differentiable convex optimisation layers.
+    Parameters
+    ----------
+    constraint_mode : str
+        One of ``"lagrangian"`` (default, constraint via loss),
+        ``"projection"`` (hard KL projection — requires re-adding
+        projection diagnostics), or ``"unconstrained"`` (plain softmax
+        with no constraint mechanism).
     """
 
     def __init__(
@@ -106,6 +105,8 @@ class CertiQIndexModel(nn.Module):
         num_heads: int = 4,
         num_inducing_points: int = 4,
         dropout: float = 0.0,
+        constraint_mode: str = "lagrangian",
+        cost_learner_hidden_dim: int = 64,
     ) -> None:
         super().__init__()
         self.N = N
@@ -115,6 +116,9 @@ class CertiQIndexModel(nn.Module):
         self.beta = beta
         self.cost_fn = cost_fn
         self.d_xi = int(d_xi)
+        self.constraint_mode = constraint_mode
+        if cost_fn == "learned":
+            self.cost_learner = CostLearner(N, hidden_dim=cost_learner_hidden_dim, d_xi=self.d_xi)
         self.index_head = MarginalIndexHead(
             N,
             hidden_dim=hidden_dim,
@@ -134,7 +138,6 @@ class CertiQIndexModel(nn.Module):
         mu: Tensor,
         xi: Tensor | None = None,
         *,
-        certify: bool = True,
         training_mode: bool = False,
     ) -> DispatcherForward:
         batch, n = Q.shape
@@ -144,11 +147,12 @@ class CertiQIndexModel(nn.Module):
             cost = sed_index(Q, mu_b)
         elif self.cost_fn == "qmd":
             cost = quadratic_drift_index(Q, mu_b)
+        elif self.cost_fn == "learned":
+            cost = self.cost_learner(Q, mu_b, xi)
         else:
             raise ValueError(f"Unknown cost_fn: {self.cost_fn}")
         cost_min = cost.min(dim=-1).values
-        budget = cost.min(dim=-1).values + self.C
-        p_cert = normalize_policy(torch.softmax(-cost / self.tau, dim=-1))
+        budget = cost_min + self.C
 
         learned_logits, value = self.index_head(Q, mu_b, xi)
         effective_tau = self.tau * (
@@ -156,58 +160,43 @@ class CertiQIndexModel(nn.Module):
         )
         proposal_logits = -learned_logits / effective_tau
 
-        if certify:
-            pi, nu, solver_status = DifferentiableKLProjection.apply(
-                proposal_logits, cost, budget
+        if self.constraint_mode == "projection":
+            raise NotImplementedError(
+                "Projection mode requires the full KL-projection diagnostics "
+                "fields (A_cert, solver_status, etc.) which have been removed "
+                "from DispatcherDiagnostics. Use constraint_mode='lagrangian' "
+                "for the soft-constrained path."
             )
-        else:
-            pi = torch.softmax(proposal_logits, dim=-1)
-            nu = torch.zeros(batch, device=Q.device, dtype=Q.dtype)
-            solver_status = torch.zeros(batch, device=Q.device, dtype=torch.long)
+        # Lagrangian and unconstrained modes both use plain softmax;
+        # the difference is only in the training loss.
+        pi = torch.softmax(proposal_logits, dim=-1)
 
-        fallback_needed = solver_status > 0
-        if fallback_needed.any():
-            fallback_idx = cost.argmin(dim=-1)
-            pi_fallback = torch.zeros_like(pi)
-            pi_fallback.scatter_(1, fallback_idx.unsqueeze(-1), 1.0)
-            pi = torch.where(fallback_needed.unsqueeze(-1), pi_fallback, pi)
-            nu = torch.where(fallback_needed, torch.zeros_like(nu), nu)
-
-        q_proposal = torch.softmax(proposal_logits, dim=-1)
-
-        projected = (pi - q_proposal).abs().sum(dim=-1) > 1e-8
-        a_proposal = arrival_coordinate(q_proposal, cost)
-        a_final = arrival_coordinate(pi, cost)
-        correction = (pi - q_proposal).abs().sum(dim=-1)
+        # Diagnostics (dual variable belongs to the training module)
+        a_final = (pi * cost).sum(dim=-1)
+        constraint_violation = (a_final - budget).clamp(min=0.0)
 
         diag = DispatcherDiagnostics(
-            A_cert=arrival_coordinate(p_cert, cost),
-            A_proposal=a_proposal,
+            A_proposal=a_final,
             A_final=a_final,
             m_Q=cost_min,
             B_Q=budget,
             certificate_slack=budget - a_final,
+            constraint_violation=constraint_violation,
             usage_raw=torch.ones(batch, device=Q.device, dtype=Q.dtype),
-            usage_final=(~projected).to(dtype=Q.dtype),
+            usage_final=torch.ones(batch, device=Q.device, dtype=Q.dtype),
             usage_cap=torch.ones(batch, device=Q.device, dtype=Q.dtype),
-            fallback_active=fallback_needed,
-            correction_magnitude=correction,
-            policy_entropy=policy_entropy(pi),
+            policy_entropy=-(pi * pi.clamp_min(1e-9).log()).sum(dim=-1),
             selected_resource=pi.argmax(dim=-1),
             pressure_mean=torch.zeros(batch, device=Q.device, dtype=Q.dtype),
             pressure_max=torch.zeros(batch, device=Q.device, dtype=Q.dtype),
             pressure_update_norm=torch.zeros(batch, device=Q.device, dtype=Q.dtype),
-            projection_nu=nu,
-            projection_active=projected,
-            proposal_slack=budget - a_proposal,
-            solver_status=solver_status,
         )
         return DispatcherForward(
             pi=pi,
             diagnostics=diag,
             value=value,
-            p_cert=p_cert,
-            p_proposal=q_proposal,
+            p_cert=pi,
+            p_proposal=pi,
             usage_raw=diag.usage_raw,
             usage_final=diag.usage_final,
             proposal_logits=proposal_logits,
@@ -220,8 +209,7 @@ class CertiQIndexModel(nn.Module):
         mu: Tensor,
         xi: Tensor | None = None,
         *,
-        certify: bool = True,
         training_mode: bool = False,
     ) -> tuple[Tensor, DispatcherDiagnostics]:
-        out = self.forward_full(Q, mu, xi, certify=certify, training_mode=training_mode)
+        out = self.forward_full(Q, mu, xi, training_mode=training_mode)
         return out.pi, out.diagnostics
