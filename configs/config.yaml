@@ -30,9 +30,7 @@ sweep:
   envs: [family_a, family_b, family_c, family_e]
 
 loss:
-  omega_bc: 0.0
-  omega_action: 0.0
-  omega_margin: 0.0
+  omega_bc: 1.0
   omega_usage: 0.1
   omega_certificate: 5.0
   omega_correction: 0.001
