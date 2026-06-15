@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch import Tensor
 
 from certiqnet.dispatcher.certiq.certificate import normalize_policy
+from certiqnet.dispatcher.types import DispatcherDiagnostics
 from certiqnet.models.baselines._base import baseline_device, expand_mu, make_lagrangian_diagnostics
 
 
