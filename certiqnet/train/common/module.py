@@ -111,15 +111,13 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         epoch = int(getattr(self.trainer, "current_epoch", 0))
         base = float(self.loss_fn.omega_bc)
         if epoch >= self.imitation_warmup_epochs:
-            post_warmup = epoch - self.imitation_warmup_epochs
-            return base * (self.imitation_decay_rate ** post_warmup)
+            return 0.0
         return base
 
     def _supervised_weight(self) -> float:
         epoch = int(getattr(self.trainer, "current_epoch", 0))
         if epoch >= self.imitation_warmup_epochs:
-            post_warmup = epoch - self.imitation_warmup_epochs
-            return self.imitation_decay_rate ** post_warmup
+            return 0.0
         return 1.0
 
     def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor:

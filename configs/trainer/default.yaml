@@ -25,3 +25,4 @@ trainer:
   imitation_decay_rate: 0.96
   target_kl_cert: 0.01
   initial_policy_kl_weight: 0.05
+  expert_mode: qmd

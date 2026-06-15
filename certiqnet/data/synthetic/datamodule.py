@@ -42,6 +42,7 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
         synthetic_mix_fraction: float = 0.5,
         teacher_mix_fraction: float = 0.25,
         policy_mix_fraction: float = 0.25,
+        hard_state_fraction: float = 0.5,
     ) -> None:
         super().__init__()
         self.N = int(N)
@@ -57,6 +58,7 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
         self.synthetic_mix_fraction = float(synthetic_mix_fraction)
         self.teacher_mix_fraction = float(teacher_mix_fraction)
         self.policy_mix_fraction = float(policy_mix_fraction)
+        self.hard_state_fraction = float(hard_state_fraction)
         self.policy_buffer_max = int(policy_buffer_max)
         self._epoch = 0
         self.train_ds: TensorDataset | None = None
@@ -109,16 +111,26 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
         gen = torch.Generator().manual_seed(self.seed + self._epoch * 9973)
 
         synthetic_count = max(1, int(self.n_samples * self.synthetic_mix_fraction))
+        hard_count = max(1, int(synthetic_count * self.hard_state_fraction))
+        if hard_count >= synthetic_count:
+            hard_count = synthetic_count
+            easy_synthetic_count = 0
+        else:
+            easy_synthetic_count = synthetic_count - hard_count
         teacher_count = max(0, int(self.n_samples * self.teacher_mix_fraction))
         policy_count = max(0, int(self.n_samples * self.policy_mix_fraction))
-        adversarial_count = max(32, self.n_samples // 8)
+        adversarial_count = max(32, self.n_samples // 4)
 
-        synthetic = self.adapter.sample_batch(
-            n_samples=synthetic_count,
-            N=self.N,
-            mu=self.mu,
-            max_queue=self.max_queue,
-            generator=gen,
+        synthetic_easy = (
+            self.adapter.sample_batch(
+                n_samples=easy_synthetic_count,
+                N=self.N,
+                mu=self.mu,
+                max_queue=self.max_queue,
+                generator=gen,
+            )
+            if easy_synthetic_count > 0
+            else None
         )
 
         teacher_states = self._sample_rows(self._buffer_tensor(self._teacher_buffer), teacher_count, gen)
@@ -145,15 +157,21 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
             mu=self.mu,
             beta=1.0,
             R_cert=float("inf"),
-            n_random=adversarial_count,
+            n_random=max(adversarial_count * 4, hard_count * 4),
             n_grid=0,
             n_boundary=max(64, self.N * 8),
         )
+        backlog = bank.sum(dim=-1)
+        hard_rank = torch.topk(backlog, k=min(hard_count, bank.shape[0]), largest=True).indices
+        hard_states = bank[hard_rank]
+        if hard_states.shape[0] < hard_count:
+            hard_states = self._sample_rows(hard_states, hard_count, gen)
         adversarial_states = self._sample_rows(bank, adversarial_count, gen)
 
         Q = torch.cat(
             [
-                synthetic.Q.float(),
+                synthetic_easy.Q.float() if synthetic_easy is not None else torch.empty(0, self.N),
+                hard_states.float(),
                 teacher_states.float(),
                 policy_states.float(),
                 adversarial_states.float(),
@@ -162,7 +180,8 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
         )
         mu = torch.cat(
             [
-                synthetic.mu.float(),
+                synthetic_easy.mu.float() if synthetic_easy is not None else torch.empty(0, self.N),
+                self.mu.unsqueeze(0).expand(hard_states.shape[0], -1),
                 self.mu.unsqueeze(0).expand(teacher_states.shape[0], -1),
                 self.mu.unsqueeze(0).expand(policy_states.shape[0], -1),
                 self.mu.unsqueeze(0).expand(adversarial_states.shape[0], -1),

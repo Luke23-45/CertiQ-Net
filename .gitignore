@@ -43,7 +43,7 @@ lightning_logs/
 Thumbs.db
 
 # Hydra
-outputs/
+# outputs/
 multirun/
 tests
 legacy
@@ -60,3 +60,4 @@ main.text
 docs/implementions/plan.md
 main.txt
 suggestions.md
+resolution_report.md

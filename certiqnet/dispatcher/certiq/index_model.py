@@ -97,6 +97,7 @@ class CertiQIndexModel(nn.Module):
         N: int,
         hidden_dim: int = 64,
         tau: float = 1.0,
+        exploration_temperature: float = 1.5,
         C: float = 2.0,
         beta: float = 1.0,
         cost_fn: str = "sed",
@@ -109,6 +110,7 @@ class CertiQIndexModel(nn.Module):
         super().__init__()
         self.N = N
         self.tau = tau
+        self.exploration_temperature = float(exploration_temperature)
         self.C = C
         self.beta = beta
         self.cost_fn = cost_fn
@@ -149,7 +151,9 @@ class CertiQIndexModel(nn.Module):
         p_cert = normalize_policy(torch.softmax(-cost / self.tau, dim=-1))
 
         learned_logits, value = self.index_head(Q, mu_b, xi)
-        effective_tau = self.tau
+        effective_tau = self.tau * (
+            self.exploration_temperature if training_mode else 1.0
+        )
         proposal_logits = -learned_logits / effective_tau
 
         if certify:

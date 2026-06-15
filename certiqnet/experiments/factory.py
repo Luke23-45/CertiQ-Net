@@ -103,6 +103,7 @@ def build_model(cfg: DictConfig, N: int, d_xi: int = 0) -> torch.nn.Module:
             N=N,
             hidden_dim=int(model_data.get("hidden_dim", 64)),
             tau=float(model_data.get("tau", 1.0)), C=float(model_data.get("C", 2.0)),
+            exploration_temperature=float(model_data.get("exploration_temperature", 1.5)),
             beta=float(model_data.get("beta", 1.0)),
             d_xi=d_xi,
             encoder_layers=int(model_data.get("encoder_layers", 2)),

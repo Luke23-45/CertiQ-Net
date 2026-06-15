@@ -27,6 +27,7 @@ model:
         N: 10
         hidden_dim: 128
         tau: 1.0
+        exploration_temperature: 1.5
         C: 20.0
         beta: 1.0
         encoder_layers: 2
@@ -59,3 +60,4 @@ data:
     synthetic_mix_fraction: 0.5
     teacher_mix_fraction: 0.25
     policy_mix_fraction: 0.25
+    hard_state_fraction: 0.75
