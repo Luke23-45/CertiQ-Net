@@ -21,3 +21,4 @@ trainer:
   ppo_epochs: 4
   ppo_batch_size: 64
   ppo_manual_clip_val: 1.0
+  expert_mode: qmd
