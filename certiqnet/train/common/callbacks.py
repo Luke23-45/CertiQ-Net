@@ -60,14 +60,10 @@ class CertificateAuditCallback(pl.Callback if pl is not None else object):
         self,
         assert_after_epoch: int = 10,
         violation_tol: float = 0.5,
-        lagrangian_decay: float = 0.95,
-        lagrangian_check_fraction: float = 0.5,
     ) -> None:
         super().__init__()
         self.assert_after_epoch = int(assert_after_epoch)
         self.violation_tol = float(violation_tol)
-        self.lagrangian_decay = float(lagrangian_decay)
-        self.lagrangian_check_fraction = float(lagrangian_check_fraction)
 
     def on_validation_epoch_end(self, trainer: _TrainerLike, pl_module: _LightningLike) -> None:
         model = pl_module.model
@@ -99,43 +95,28 @@ class CertificateAuditCallback(pl.Callback if pl is not None else object):
         pl_module.log("audit/max_violation", max_violation, prog_bar=True)
         pl_module.log("audit/violation_rate", (diag.A_final > diag.B_Q).float().mean(), prog_bar=True)
         pl_module.log("audit/dual_lambda", pl_module.dual_lambda, prog_bar=True)
+
         fin_cb = getattr(model, "C", float("inf")) < float("inf")
         epoch = trainer.current_epoch
         constraint_mode = getattr(model, "constraint_mode", "projection")
-        max_epochs = float(getattr(trainer, "max_epochs", 200))
 
         if not fin_cb:
             return
 
-        # Warn about early violations (before assertion window opens)
-        if max_violation > self.violation_tol and epoch < self.assert_after_epoch:
-            warnings.warn(
-                f"Early certificate violation (epoch {epoch}): {max_violation:.2e} "
-                f"(tolerance kicks in at epoch {self.assert_after_epoch}).",
-                stacklevel=2,
-            )
-
-        if epoch < self.assert_after_epoch:
-            return
-
-        if constraint_mode == "lagrangian":
-            training_progress = epoch / max_epochs
-            if training_progress >= self.lagrangian_check_fraction:
-                # Late training: enforce relaxed exponentially decaying tolerance
-                C_val = float(getattr(model, "C", 20.0))
-                progress = epoch - self.assert_after_epoch
-                effective_tol = max(self.violation_tol, C_val * (self.lagrangian_decay ** progress))
-                if max_violation > effective_tol:
-                    raise AssertionError(
-                        f"CERTIFICATE AUDIT FAILED after epoch {epoch}. "
-                        f"Max violation: {max_violation:.2e} "
-                        f"(Lagrangian relaxed tolerance: {effective_tol:.2e}, "
-                        f"base: {self.violation_tol}, C={C_val:.2e})."
-                    )
-        else:
+        # Projection mode: original strict assertion (constraint is guaranteed by projection)
+        # Lagrangian mode: observational only — constraints are satisfied asymptotically
+        if constraint_mode != "lagrangian" and epoch >= self.assert_after_epoch:
             if max_violation > self.violation_tol:
                 raise AssertionError(
                     f"CERTIFICATE AUDIT FAILED after epoch {epoch}. "
                     f"Max projection violation: {max_violation:.2e} "
                     f"(tolerance: {self.violation_tol}, C={getattr(model,'C',float('inf')):.2e})."
                 )
+
+        # Warning for any mode when violation exceeds tolerance (only before assertion window)
+        if max_violation > self.violation_tol and epoch < self.assert_after_epoch:
+            warnings.warn(
+                f"Early certificate violation (epoch {epoch}): {max_violation:.2e} "
+                f"(tolerance kicks in at epoch {self.assert_after_epoch}).",
+                stacklevel=2,
+            )

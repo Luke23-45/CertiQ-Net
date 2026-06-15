@@ -54,7 +54,7 @@ class TrainerConfig:
     dual_lambda_lr: float = 0.01
     dual_lambda_init: float = 0.0
     dual_lambda_momentum: float = 0.9
-    dual_lr_warmup_steps: int = 100
+    dual_lr_warmup_steps: int = 10
     dual_lambda_max: float = 10.0
     dual_lr_decay: float = 1.0
 
