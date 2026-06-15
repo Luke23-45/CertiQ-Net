@@ -37,9 +37,9 @@ model:
     loss_fn:
       class_path: certiqnet.train.common.loss.CertiQNetLoss
       init_args:
-        omega_bc: 1.0
-        omega_action: 1.5
-        omega_margin: 0.1
+        omega_bc: 0.0
+        omega_action: 0.0
+        omega_margin: 0.0
         omega_usage: 0.1
         omega_certificate: 5.0
         omega_correction: 0.01
