@@ -41,7 +41,7 @@ lightning_logs/
 *~
 .DS_Store
 Thumbs.db
-
+future_works
 # Hydra
 # outputs/
 multirun/

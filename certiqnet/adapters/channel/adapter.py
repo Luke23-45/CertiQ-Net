@@ -3,8 +3,8 @@
 import torch
 from torch import Tensor
 
-from certiqnet.adapters.base import AdapterBatch, DispatchTuple
-from certiqnet.adapters.queueing import QueueingAdapter
+from certiqnet.adapters.common.base import AdapterBatch, DispatchTuple
+from certiqnet.adapters.queueing.adapter import QueueingAdapter
 
 
 class ChannelAdapter(QueueingAdapter):

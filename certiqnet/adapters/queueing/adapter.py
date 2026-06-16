@@ -2,7 +2,7 @@
 
 import torch
 
-from certiqnet.adapters.base import AdapterBatch, DispatchAdapter, DispatchTuple
+from certiqnet.adapters.common.base import AdapterBatch, DispatchAdapter, DispatchTuple
 
 
 class QueueingAdapter(DispatchAdapter):

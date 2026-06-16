@@ -14,7 +14,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
-from certiqnet.diagnostics.state_bank import generate_state_bank
+from certiqnet.data.synthetic.state_bank import generate_state_bank
 from certiqnet.experiments.baseline_runner import RolloutConfig, run_baseline_comparison
 from certiqnet.experiments.checkpoint_state import (
     load_checkpoint_weights,
@@ -33,8 +33,6 @@ from certiqnet.data.synthetic.datamodule import CertiQNetDataModule
 from certiqnet.train.common.loss import CertiQNetLoss
 from certiqnet.train.queueing.module import QueueingLightningModule
 from certiqnet.train.channel.module import ChannelLightningModule
-from certiqnet.train.moe.module import MoELightningModule
-from certiqnet.train.robotics.module import RoboticsLightningModule
 from certiqnet.utils.platform import detect_platform, resolve_trainer_config
 from certiqnet.utils.progress import configure_progress
 
@@ -336,10 +334,6 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             lightning = QueueingLightningModule(**module_kwargs)
         elif adapter_name == "ChannelAdapter":
             lightning = ChannelLightningModule(**module_kwargs)
-        elif adapter_name == "MoEAdapter":
-            lightning = MoELightningModule(**module_kwargs)
-        elif adapter_name == "RoboticsAdapter":
-            lightning = RoboticsLightningModule(**module_kwargs)
         else:
             lightning = QueueingLightningModule(**module_kwargs)
         logger = instantiate(cfg.logger, save_dir=str(paths.logs)) if "logger" in cfg else False

@@ -14,7 +14,7 @@ except ModuleNotFoundError:
     pl = None
 
 from certiqnet.dispatcher.types import DispatcherDiagnostics
-from certiqnet.simulation.ctmc import CTMCEnvironment
+from certiqnet.utils.ctmc import CTMCEnvironment
 from certiqnet.train.common.loss import CertiQNetLoss
 from certiqnet.dispatcher.delay_geometry import sed_index, quadratic_drift_index
 

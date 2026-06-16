@@ -11,7 +11,7 @@ try:
 except ModuleNotFoundError:
     pl = None
 
-from certiqnet.diagnostics.state_bank import generate_state_bank
+from certiqnet.data.synthetic.state_bank import generate_state_bank
 from certiqnet.dispatcher.types import DispatcherDiagnostics
 
 

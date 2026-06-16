@@ -7,10 +7,10 @@ from pathlib import Path
 
 import torch
 
-from certiqnet.adapters.base import DispatchAdapter
-from certiqnet.adapters.queueing import QueueingAdapter
+from certiqnet.adapters.common.base import DispatchAdapter
+from certiqnet.adapters.queueing.adapter import QueueingAdapter
 from certiqnet.experiments.metrics import ExperimentMetrics, aggregate_metrics, save_metrics
-from certiqnet.experiments.progress import progress
+from certiqnet.utils.progress import progress
 from certiqnet.models.baselines import (
     AnalyticBackbonePolicy,
     CMuRule,
@@ -22,7 +22,7 @@ from certiqnet.models.baselines import (
     SoftCMuRule,
     SoftMaxWeight,
 )
-from certiqnet.simulation.ctmc import CTMCEnvironment
+from certiqnet.utils.ctmc import CTMCEnvironment
 
 
 def _has_learnable_params(model: torch.nn.Module) -> bool:

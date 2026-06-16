@@ -51,7 +51,7 @@ select = ["E", "F", "I", "B", "UP", "ANN"]
 ignore = ["UP017"]
 
 [tool.ruff.lint.per-file-ignores]
-"scripts/*.py" = ["E402"]
+"certiqnet/scripts/*.py" = ["E402"]
 "certiqnet/utils/progress.py" = ["ANN401"]
 "studies/**/*.py" = ["E402", "UP035", "UP006", "ANN002", "ANN003"]
 "certiqnet/utils/config_schemas.py" = ["F821"]

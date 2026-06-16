@@ -3,10 +3,10 @@
 Usage
 -----
 New (LightningCLI):
-    python scripts/train.py --cli --config configs/experiments/queueing/certiq_index.yaml
+    python certiqnet/scripts/train.py --cli --config configs/experiments/queueing/certiq_index.yaml
 
 Legacy (Hydra):
-    python scripts/train.py model=certiq_index env=family_a adapter=queueing trainer=default
+    python certiqnet/scripts/train.py model=certiq_index env=family_a adapter=queueing trainer=default
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import sys
 import argparse
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

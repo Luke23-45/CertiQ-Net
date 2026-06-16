@@ -2,8 +2,8 @@
 
 Usage
 -----
-    python scripts/collect_qgym.py --config configs/qgym/collection/reentrant_2.yaml
-    python scripts/collect_qgym.py --config configs/qgym/collection/reentrant_2.yaml --force
+    python -m certiqnet.data.qgym.collect_qgym --config configs/qgym/collection/reentrant_2.yaml
+    python -m certiqnet.data.qgym.collect_qgym --config configs/qgym/collection/reentrant_2.yaml --force
 
 The script reads a ``QGymCollectionConfig`` YAML, spins up a QGym
 environment, collects states using the configured policy (or mixed-policy
@@ -23,7 +23,7 @@ import numpy as np
 import torch
 import yaml
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 

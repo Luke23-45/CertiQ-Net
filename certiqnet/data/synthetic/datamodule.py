@@ -13,9 +13,9 @@ try:
 except ModuleNotFoundError:
     pl = None
 
-from certiqnet.adapters.base import DispatchAdapter
-from certiqnet.adapters.queueing import QueueingAdapter
-from certiqnet.diagnostics.state_bank import generate_state_bank
+from certiqnet.adapters.common.base import DispatchAdapter
+from certiqnet.adapters.queueing.adapter import QueueingAdapter
+from certiqnet.data.synthetic.state_bank import generate_state_bank
 from certiqnet.train.common.supervision import heuristic_actions
 from certiqnet.utils.platform import resolve_num_workers
 

@@ -2,7 +2,7 @@
 
 This module provides ``QGymDataset``, a ``torch.utils.data.Dataset`` that
 lazily indexes into a directory of shard files produced by the collection
-script (``scripts/collect_qgym.py``).
+script (``certiqnet.data.qgym.collect_qgym``).
 
 It is deliberately *data-only* — the Lightning ``DataModule`` that wires
 it into training lives in ``certiqnet.data.qgym.datamodule``.

@@ -6,7 +6,7 @@ import torch
 from torch import Tensor
 
 from certiqnet.dispatcher.types import DispatcherDiagnostics
-from certiqnet.math.lyapunov import tail_size
+from certiqnet.data.synthetic.lyapunov import tail_size
 
 
 class AuditableModel(Protocol):

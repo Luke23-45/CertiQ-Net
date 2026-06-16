@@ -43,7 +43,7 @@ except ModuleNotFoundError:  # pragma: no cover
 from certiqnet.adapters.qgym.adapter import QGymAdapter
 from certiqnet.adapters.qgym.env_loader import compute_queue_holding_cost
 from certiqnet.data.qgym.dataset import QGymDataset
-from certiqnet.diagnostics.state_bank import generate_state_bank
+from certiqnet.data.synthetic.state_bank import generate_state_bank
 from certiqnet.train.common.supervision import heuristic_actions
 from certiqnet.utils.platform import resolve_num_workers
 

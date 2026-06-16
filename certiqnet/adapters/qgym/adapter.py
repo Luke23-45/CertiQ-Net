@@ -17,7 +17,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from certiqnet.adapters.base import AdapterBatch, DispatchAdapter, DispatchTuple
+from certiqnet.adapters.common.base import AdapterBatch, DispatchAdapter, DispatchTuple
 from certiqnet.adapters.qgym.config import QGymEnvConfig, resolve_env_config_path
 from certiqnet.adapters.qgym.env_loader import (
     compute_effective_mu,
