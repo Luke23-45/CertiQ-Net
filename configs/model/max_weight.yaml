@@ -1,5 +1,0 @@
-model:
-  class_path: certiqnet.models.baselines.MaxWeight
-  init_args:
-    N: 10
-    beta: 1.0

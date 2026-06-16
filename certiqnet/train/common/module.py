@@ -70,6 +70,11 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         dual_lr_warmup_steps: int = 10,
         dual_lambda_max: float = 10.0,
         dual_lr_decay: float = 1.0,
+        # ── RL return estimation ──────────────────────────────────────
+        gamma: float = 0.99,
+        gae_lambda: float = 0.95,
+        # ── Validation rollout ────────────────────────────────────────
+        val_horizon_max: int = 8,
     ) -> None:
         super().__init__()
         self.model = model
@@ -95,6 +100,9 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self.dual_lr_warmup_steps = int(dual_lr_warmup_steps)
         self.dual_lambda_max = float(dual_lambda_max)
         self.dual_lr_decay = float(dual_lr_decay)
+        self.gamma = float(gamma)
+        self.gae_lambda = float(gae_lambda)
+        self.val_horizon_max = int(val_horizon_max)
         self.register_buffer("dual_lambda", torch.tensor(float(dual_lambda_init)))
         self.register_buffer("_smoothed_residual", torch.tensor(0.0))
         self.register_buffer("_dual_update_count", torch.tensor(0, dtype=torch.long))
@@ -218,8 +226,8 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         actions_t = torch.stack(actions_list, dim=0)
         kl_loss = torch.stack(kl_terms, dim=0).mean()
 
-        gamma = 0.99
-        gae_lambda = 0.95
+        gamma = self.gamma
+        gae_lambda = self.gae_lambda
         with torch.no_grad():
             final_Q = env.Q.clone()
             final_out = self.model.forward_full(final_Q, mu0, xi0, training_mode=True)
@@ -425,7 +433,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         queue_trace: list[Tensor] = []
         cost_trace: list[Tensor] = []
         dt_trace: list[Tensor] = []
-        val_horizon = max(4, min(self.rollout_horizon, 8))
+        val_horizon = max(4, min(self.rollout_horizon, self.val_horizon_max))
         with torch.no_grad():
             for _ in range(val_horizon):
                 Q_obs = env.Q.clone()

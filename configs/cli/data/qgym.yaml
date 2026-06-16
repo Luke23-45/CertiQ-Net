@@ -1,0 +1,21 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# configs/cli/data/qgym.yaml
+#
+# LightningCLI QGym data module — full production settings.
+# All QGymDataModule init_args are explicit here.
+# ──────────────────────────────────────────────────────────────────────────────
+data:
+  class_path: certiqnet.data.qgym.datamodule.QGymDataModule
+  init_args:
+    N: 10                          # override per experiment to match env.N
+    batch_size: 64
+    n_samples: 512
+    seed: 42
+    max_queue: 15
+    resample_every_epoch: true
+    policy_buffer_max: 4096
+    teacher_mix_fraction: 0.25
+    policy_mix_fraction: 0.25
+    hard_state_fraction: 0.75      # higher hard-state density for QGym
+    synthetic_mix_fraction: 0.0    # QGym is primary source — no synthetic padding
+    dataset_path: dataset/qgym/reentrant_2

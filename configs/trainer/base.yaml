@@ -1,0 +1,64 @@
+# @package _global_
+# ──────────────────────────────────────────────────────────────────────────────
+# configs/trainer/base.yaml
+#
+# SINGLE SOURCE OF TRUTH for all trainer hyperparameters.
+# Every other trainer config (default, fast_dev, ...) inherits this and
+# only overrides the fields that differ.  Do NOT duplicate these values
+# elsewhere — change them here and let overrides propagate.
+# ──────────────────────────────────────────────────────────────────────────────
+trainer:
+
+  # ── PyTorch Lightning Trainer ──────────────────────────────────────────────
+  max_epochs: 200
+  accelerator: auto
+  devices: 1
+  precision: bf16-mixed
+  gradient_clip_val: 0.0        # 0.0 = disabled (PPO uses manual clipping)
+  val_check_interval: 0.25      # validate 4× per epoch
+  log_every_n_steps: 10
+
+  # ── Optimization ───────────────────────────────────────────────────────────
+  lr: 3.0e-4
+  weight_decay: 1.0e-5
+
+  # ── Data source ────────────────────────────────────────────────────────────
+  dataset_type: synthetic        # "synthetic" | "qgym"
+
+  # ── RL / Rollout ───────────────────────────────────────────────────────────
+  rollout_horizon: 64            # steps per training rollout
+  gamma: 0.99                    # RL discount factor
+  gae_lambda: 0.95               # GAE (Generalized Advantage Estimation) λ
+  val_horizon_max: 8             # cap on validation rollout length
+
+  # ── PPO ────────────────────────────────────────────────────────────────────
+  use_ppo: true
+  ppo_epochs: 4                  # number of PPO update epochs per rollout
+  ppo_clip_epsilon: 0.2          # clipping ε for actor and critic
+  ppo_manual_clip_val: 1.0       # gradient-norm clip inside PPO loop
+
+  # ── Curriculum / Warmup ────────────────────────────────────────────────────
+  entropy_warmup_epochs: 20      # epochs before entropy bonus activates
+  imitation_warmup_epochs: 20    # epochs of pure imitation learning
+  critic_bootstrap_epochs: 3     # extra epochs to bootstrap critic before RL
+  imitation_decay_rate: 0.96     # exponential decay of imitation weight
+  expert_mode: qmd               # expert policy used for BC: "sed" | "qmd"
+
+  # ── Lagrangian Dual Variable ────────────────────────────────────────────────
+  dual_lambda_lr: 0.01           # dual variable learning rate
+  dual_lambda_init: 0.0          # initial value of λ
+  dual_lambda_momentum: 0.9      # EMA momentum for smoothed constraint residual
+  dual_lr_warmup_steps: 10       # linear warmup steps for dual LR
+  dual_lambda_max: 10.0          # hard cap on λ
+  dual_lr_decay: 1.0             # multiplicative decay per step (1.0 = none)
+  target_kl_cert: 0.01           # KL threshold for adaptive KL-weight update
+  initial_policy_kl_weight: 0.05 # starting weight for policy-KL penalty
+
+  # ── Data Mix (single source of truth) ─────────────────────────────────────
+  # These are passed through to the data module — do not set them there too.
+  policy_buffer_max: 4096        # max states in policy-replay buffer
+  policy_mix_fraction: 0.25      # fraction of batch from policy replay
+  teacher_mix_fraction: 0.25     # fraction of batch from teacher replay
+  synthetic_mix_fraction: 0.5    # fraction of batch from synthetic generator
+  hard_state_fraction: 0.5       # fraction of synthetic that are hard states
+  max_queue: 15                  # max queue depth for synthetic generation

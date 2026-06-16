@@ -1,0 +1,20 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# configs/cli/model/backbone_only.yaml
+#
+# Analytic backbone-only policy (no learning, BC-style evaluation baseline).
+# use_ppo: false — runs a single epoch with rollout for evaluation only.
+# ──────────────────────────────────────────────────────────────────────────────
+model:
+  class_path: certiqnet.train.queueing.module.QueueingLightningModule
+  init_args:
+    lr: 3.0e-4
+    rollout_horizon: 16
+    use_ppo: false
+    lam: 1.0              # override per experiment if env.lam differs
+    model:
+      class_path: certiqnet.models.baselines.AnalyticBackbonePolicy
+      init_args:
+        beta: 1.0
+        C: .inf
+    loss_fn:
+      class_path: certiqnet.train.common.loss.CertiQNetLoss

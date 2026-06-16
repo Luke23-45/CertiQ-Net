@@ -1,12 +1,11 @@
-# @package _global_
 # ──────────────────────────────────────────────────────────────────────────────
-# configs/experiments/queueing/certiq_index.yaml
+# configs/runner/default.yaml
 #
-# Full CertiQ-Net training run with synthetic data.
+# Parameters for the evaluation/sweep runner script.
+# Extracted from the root config.yaml where they had no Python backing.
 # ──────────────────────────────────────────────────────────────────────────────
-defaults:
-  - /trainer: default
-  - /model: certiq_index
-  - /data: synthetic
-
-seed_everything: 42
+runner:
+  rollout_steps: 1000       # number of environment steps per evaluation rollout
+  rollout_batch_size: 32    # parallel environments / batch size for rollout
+  max_backlog: 1000000.0    # upper bound on queue backlog before episode reset
+  show_progress: true       # display tqdm progress bar during rollout

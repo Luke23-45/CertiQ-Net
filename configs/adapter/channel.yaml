@@ -1,6 +1,0 @@
-# @package _global_
-adapter:
-  _target_: certiqnet.adapters.channel.adapter.ChannelAdapter
-  certificate_status: approximate
-  fading_mode: block
-  assumptions_satisfied: false

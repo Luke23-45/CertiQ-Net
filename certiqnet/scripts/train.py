@@ -37,18 +37,41 @@ _CLI_TRAINER_KEYS = {
     "reload_dataloaders_every_n_epochs", "default_root_dir",
 }
 
-def _run_cli(config_path: str) -> None:
+def _run_cli(config_path: str, unknown_args: list[str]) -> None:
+    import sys
     import tempfile
     import yaml
-    raw = yaml.safe_load(open(config_path))
-    # Strip unknown keys from trainer
-    if "trainer" in raw:
-        raw["trainer"] = {k: v for k, v in raw["trainer"].items() if k in _CLI_TRAINER_KEYS}
-    known = {k: v for k, v in raw.items() if k in ("seed_everything", "trainer", "model", "data", "optimizer", "lr_scheduler", "ckpt_path")}
+    from omegaconf import OmegaConf
+    
+    # Load with OmegaConf to natively support Hydra-like 'defaults:'
+    cfg = OmegaConf.create()
+    exp_cfg = OmegaConf.load(config_path)
+    defaults = exp_cfg.get("defaults", [])
+    
+    for d in defaults:
+        if isinstance(d, str):
+            continue
+        for key, val in d.items():
+            if key == "override /dataset":
+                key = "data"
+            p = ROOT / "configs" / "cli" / key / f"{val}.yaml"
+            if not p.exists():
+                p = ROOT / "configs" / "cli" / f"{val}.yaml"
+            if p.exists():
+                sub = OmegaConf.load(p)
+                cfg = OmegaConf.merge(cfg, sub)
+    
+    # Remove defaults node and merge the rest of the experiment config
+    if "defaults" in exp_cfg:
+        del exp_cfg["defaults"]
+    cfg = OmegaConf.merge(cfg, exp_cfg)
+    
+    # Write composed config to tempfile for LightningCLI
     tf = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
-    yaml.dump(known, tf)
+    yaml.dump(OmegaConf.to_container(cfg, resolve=True), tf)
     tf.close()
-    sys.argv = ["certiqnet-train", "fit", "--config", tf.name]
+    
+    sys.argv = ["certiqnet-train", "fit", "--config", tf.name] + unknown_args
     from certiqnet.cli import main as cli_main
     cli_main()
 
@@ -101,7 +124,7 @@ if __name__ == "__main__":
         if args.config is None:
             print("ERROR: --cli requires --config <path>")
             sys.exit(1)
-        _run_cli(args.config)
+        _run_cli(args.config, unknown)
     elif args.config:
         _run_legacy(config_path=args.config)
     else:

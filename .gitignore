@@ -42,6 +42,7 @@ lightning_logs/
 .DS_Store
 Thumbs.db
 future_works
+final_dataset
 # Hydra
 # outputs/
 multirun/
@@ -63,4 +64,4 @@ suggestions.md
 resolution_report.md
 docs/formal_definition/divergence_report.md
 refactor.diff
-dataset
+# dataset

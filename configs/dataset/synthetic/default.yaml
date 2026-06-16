@@ -1,0 +1,25 @@
+# @package _global_
+# ──────────────────────────────────────────────────────────────────────────────
+# configs/dataset/synthetic/default.yaml
+#
+# Synthetic data module preset for Hydra-style training.
+# The duplicate `synthetic:` block that previously mirrored `data:` verbatim
+# has been removed — there is now a single canonical `data:` definition.
+# ──────────────────────────────────────────────────────────────────────────────
+trainer:
+  dataset_type: synthetic
+
+data:
+  class_path: certiqnet.data.synthetic.datamodule.CertiQNetDataModule
+  init_args:
+    N: ${env.N}
+    batch_size: 64
+    n_samples: 512
+    seed: ${project.seed}
+    max_queue: 15
+    resample_every_epoch: true
+    policy_buffer_max: 4096
+    synthetic_mix_fraction: 0.5
+    teacher_mix_fraction: 0.25
+    policy_mix_fraction: 0.25
+    hard_state_fraction: 0.5

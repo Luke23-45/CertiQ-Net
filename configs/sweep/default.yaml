@@ -1,12 +1,11 @@
-# @package _global_
 # ──────────────────────────────────────────────────────────────────────────────
-# configs/experiments/queueing/certiq_index.yaml
+# configs/sweep/default.yaml
 #
-# Full CertiQ-Net training run with synthetic data.
+# Sweep driver configuration.
+# Extracted from the root config.yaml into its own group for clarity.
+# Use this file with your sweep launcher (e.g. Hydra multirun, wandb sweep).
 # ──────────────────────────────────────────────────────────────────────────────
-defaults:
-  - /trainer: default
-  - /model: certiq_index
-  - /data: synthetic
-
-seed_everything: 42
+sweep:
+  seeds: [0, 1, 2]                              # random seeds to sweep over
+  models: [certiq_index]                         # model configs to sweep
+  envs: [family_a, family_b, family_c, family_e] # env configs to sweep

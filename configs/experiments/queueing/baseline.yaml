@@ -1,12 +1,16 @@
 # @package _global_
 # ──────────────────────────────────────────────────────────────────────────────
-# configs/experiments/queueing/certiq_index.yaml
+# configs/experiments/queueing/baseline.yaml
 #
-# Full CertiQ-Net training run with synthetic data.
+# Shared base for all analytic-policy baseline experiments.
+# Every baseline inherits this and only overrides the model.
 # ──────────────────────────────────────────────────────────────────────────────
 defaults:
   - /trainer: default
-  - /model: certiq_index
   - /data: synthetic
 
 seed_everything: 42
+
+# Baselines run for 1 epoch (one rollout for evaluation, no gradient updates)
+trainer:
+  max_epochs: 1
