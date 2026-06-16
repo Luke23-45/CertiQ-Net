@@ -10,6 +10,11 @@ Supports two modes:
 * **online** — a live ``QGymAdapter`` steps a QGym environment during
   training, producing an infinite stream of realistic states.
 
+The module integrates with the **dataset registry** (``DatasetRegistry``):
+when ``dataset_name`` is provided the module resolves the dataset spec,
+verifies it exists (auto-collecting if necessary), and configures its
+training defaults from the centralized registry YAML.
+
 Data Composition
 ~~~~~~~~~~~~~~~~
 QGym-sampled states are the *primary* source.  On top of them the module
@@ -42,7 +47,9 @@ except ModuleNotFoundError:  # pragma: no cover
 
 from certiqnet.adapters.qgym.adapter import QGymAdapter
 from certiqnet.adapters.qgym.env_loader import compute_queue_holding_cost
+from certiqnet.data.collection_manager import DatasetCollectionManager
 from certiqnet.data.qgym.dataset import QGymDataset
+from certiqnet.data.registry import DatasetRegistry
 from certiqnet.data.synthetic.state_bank import generate_state_bank
 from certiqnet.train.common.supervision import heuristic_actions
 from certiqnet.utils.platform import resolve_num_workers
@@ -87,6 +94,16 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         states from the state bank.
     dataset_path : str | Path, optional
         Path to a ``dataset/qgym/<name>/`` directory (static mode).
+        Superseded by *dataset_name* — prefer using the registry.
+    dataset_name : str, optional
+        Name of a registered dataset (see ``DatasetRegistry``).
+        When provided, the module resolves the canonical path from
+        the registry and auto-collects if the data is missing.
+    auto_collect : bool
+        If ``True`` (default) and the dataset is missing when
+        ``dataset_name`` is used, automatically collect it.
+        If ``False``, raise ``FileNotFoundError`` with recovery
+        instructions when the dataset is absent.
     qgym_adapter : QGymAdapter, optional
         Live QGym adapter instance (online mode).
     h : Tensor | None
@@ -111,6 +128,8 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         hard_state_fraction: float = 0.5,
         adversarial_fraction: float = 0.25,
         dataset_path: str | Path | None = None,
+        dataset_name: str | None = None,
+        auto_collect: bool = True,
         qgym_adapter: QGymAdapter | None = None,
         h: Tensor | None = None,
     ) -> None:
@@ -127,6 +146,8 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         self.resample_every_epoch = bool(resample_every_epoch)
         self.policy_buffer_max = int(policy_buffer_max)
         self.dataset_path = dataset_path
+        self.dataset_name = dataset_name
+        self.auto_collect = bool(auto_collect)
         self.qgym_adapter = qgym_adapter
 
         # ── Validate and store mix fractions ──────────────────────────
@@ -154,7 +175,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             qgym_adapter is not None
             and getattr(qgym_adapter, "mode", "static") == "online"
         )
-        self._static = dataset_path is not None
+        self._static = dataset_path is not None or dataset_name is not None
 
         # ── Holding cost ──────────────────────────────────────────────
         if h is not None:
@@ -208,10 +229,128 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             return compute_queue_holding_cost(Q, self._h.to(Q.device))
         return Q.sum(dim=-1)
 
+    # ── Registry resolution ───────────────────────────────────────────
+
+    def _resolve_dataset_from_registry(self) -> None:
+        """Resolve ``dataset_name`` through the registry.
+
+        Populates ``dataset_path`` (static mode) or ``qgym_adapter``
+        (online mode).  Auto-collects if the data is missing when
+        ``auto_collect=True``.
+        """
+        registry = DatasetRegistry()
+
+        if self.dataset_name not in registry:
+            raise KeyError(
+                f"Unknown dataset '{self.dataset_name}'. "
+                f"Available: {', '.join(registry.list_datasets())}"
+            )
+
+        spec = registry.get(self.dataset_name)
+        log.info(
+            "Resolved dataset '%s' from registry: env=%s, policy=%s",
+            self.dataset_name,
+            spec.env,
+            spec.collection.policy,
+        )
+
+        # ── Determine mode ────────────────────────────────────────────
+        mode = spec.training_defaults.get("mode", "static")
+        self._mode = mode
+        self._online = mode == "online"
+        self._static = mode == "static"
+
+        if mode == "static":
+            canonical_path = registry.resolve_path(self.dataset_name)
+            if not registry.exists(self.dataset_name):
+                manager = DatasetCollectionManager(registry)
+                try:
+                    manager.ensure(
+                        self.dataset_name,
+                        auto_collect=self.auto_collect,
+                    )
+                except FileNotFoundError:
+                    raise FileNotFoundError(
+                        f"Dataset '{self.dataset_name}' not found at "
+                        f"{canonical_path}. "
+                        f"Set auto_collect=True or run:\n"
+                        f"    python -m certiqnet.data.qgym.collect_qgym "
+                        f"collect {self.dataset_name}"
+                    )
+            self.dataset_path = str(canonical_path)
+            log.info(
+                "Using static dataset '%s' from %s",
+                self.dataset_name,
+                self.dataset_path,
+            )
+
+        elif mode == "online":
+            if self.qgym_adapter is not None:
+                log.info(
+                    "Using provided QGymAdapter for online dataset '%s'",
+                    self.dataset_name,
+                )
+                return
+            log.info(
+                "Building online QGymAdapter for dataset '%s' (env: %s)...",
+                self.dataset_name,
+                spec.env,
+            )
+            self.qgym_adapter = QGymAdapter(
+                env_config=str(spec.env),
+                mode="online",
+                policy=spec.collection.policy,
+                policy_weights=spec.collection.policy_weights,
+                batch_size_env=1,
+                seed=spec.collection.seed,
+                device="cpu",
+            )
+            log.info("Online QGymAdapter created: %s", self.qgym_adapter)
+        else:
+            raise ValueError(f"Unknown mode '{mode}' for dataset '{self.dataset_name}'.")
+
+        # ── Apply training defaults from spec (low-priority) ──────────
+        defaults = spec.training_defaults
+        if defaults:
+            # Only apply defaults if the user did not explicitly set these
+            # attributes.  Explicit __init__ args always win.  The magic
+            # numbers below match the constructor default values.
+            if (
+                self.synthetic_mix_fraction == 0.0
+                and "synthetic_mix_fraction" in defaults
+            ):
+                self.synthetic_mix_fraction = float(defaults["synthetic_mix_fraction"])
+            if (
+                self.teacher_mix_fraction == 0.25
+                and "teacher_mix_fraction" in defaults
+            ):
+                self.teacher_mix_fraction = float(defaults["teacher_mix_fraction"])
+            if (
+                self.policy_mix_fraction == 0.25
+                and "policy_mix_fraction" in defaults
+            ):
+                self.policy_mix_fraction = float(defaults["policy_mix_fraction"])
+            if (
+                self.hard_state_fraction == 0.5
+                and "hard_state_fraction" in defaults
+            ):
+                self.hard_state_fraction = float(defaults["hard_state_fraction"])
+            if (
+                self.adversarial_fraction == 0.25
+                and "adversarial_fraction" in defaults
+            ):
+                self.adversarial_fraction = float(
+                    defaults["adversarial_fraction"]
+                )
+
     # ── Setup ─────────────────────────────────────────────────────────
 
     def setup(self, stage: str | None = None) -> None:
         self._epoch = 0
+
+        # ── Resolve dataset_name through the registry ─────────────────
+        if self.dataset_name is not None and self.dataset_path is None:
+            self._resolve_dataset_from_registry()
 
         if stage in (None, "fit", "validate"):
             self._setup_validation()

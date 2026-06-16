@@ -1,0 +1,31 @@
+# Centralized dataset specification for re-reentrant_3_hyper_debug.
+# Debug variant: 10K training states for fast CI / prototyping.
+name: re-reentrant_3_hyper_debug
+env: extern/QGym/configs/env/re-reentrant_3_hyper.yaml
+output_dir: final_dataset/qgym
+
+collection:
+  n_steps: 10000
+  n_valid: 1000
+  n_test: 1000
+  shard_size: 5000
+  seed: 42
+  policy: mixed
+  policy_weights:
+    random: 0.25
+    sed: 0.25
+    qmd: 0.25
+    softmax: 0.25
+
+training_defaults:
+  mode: static
+  batch_size: 64
+  n_samples: 256
+  max_queue: 15
+  resample_every_epoch: true
+  policy_buffer_max: 4096
+  teacher_mix_fraction: 0.25
+  policy_mix_fraction: 0.25
+  hard_state_fraction: 0.75
+  adversarial_fraction: 0.25
+  synthetic_mix_fraction: 0.0

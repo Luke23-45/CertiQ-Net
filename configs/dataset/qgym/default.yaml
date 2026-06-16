@@ -25,4 +25,5 @@ data:
     hard_state_fraction: 0.75    # QGym: higher hard-state density
     adversarial_fraction: 0.25
     synthetic_mix_fraction: 0.0  # QGym primary source — no synthetic padding
-    dataset_path: dataset/qgym/reentrant_2
+    dataset_name: reentrant_3_hyper  # harder: 9 queues, hyperexponential noise
+    auto_collect: true             # auto-collect if missing

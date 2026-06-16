@@ -53,6 +53,7 @@ class QGymEnvConfig:
     name: str
     lam_type: str = "constant"
     lam_params: dict = field(default_factory=lambda: {"val": None})
+    service_type: str = "exponential"
     network: list[list[float]] | None = None
     mu: list[list[float]] | None = None
     h: list[float] | None = None

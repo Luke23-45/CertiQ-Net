@@ -29,6 +29,7 @@ from certiqnet.experiments.metrics import aggregate_metrics, save_metrics
 from certiqnet.experiments.paths import RunPaths, slugify
 from certiqnet.experiments.runner import experiment_name_from_cfg, prepare_run
 from certiqnet.data.qgym.datamodule import QGymDataModule
+from certiqnet.data.registry import DatasetRegistry
 from certiqnet.data.synthetic.datamodule import CertiQNetDataModule
 from certiqnet.train.common.loss import CertiQNetLoss
 from certiqnet.train.queueing.module import QueueingLightningModule
@@ -251,7 +252,25 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
                 qargs["N"] = int(cfg.env.N)
 
             qgym_adapter_instance: QGymAdapter | None = None
-            if qgym_mode == "online":
+
+            # Prefer dataset_name (registry) over raw dataset_path
+            has_dataset_name = (
+                "dataset_name" in qargs
+                or qcfg.get("dataset_name") is not None
+            )
+            has_dataset_path = (
+                "dataset_path" in qargs
+                or qcfg.get("dataset_path") is not None
+            )
+
+            if has_dataset_name:
+                # Registry-based: QGymDataModule handles resolution & auto-collect.
+                # No need to pre-build an adapter here.
+                if "dataset_name" not in qargs:
+                    qargs["dataset_name"] = qcfg.dataset_name
+
+            elif qgym_mode == "online":
+                # Legacy online mode: build adapter from inline config
                 policy_weights_raw = qcfg.get("policy_weights")
                 policy_weights = (
                     dict(policy_weights_raw)
@@ -271,7 +290,9 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
                 # Pass holding cost from adapter if available
                 if qgym_adapter_instance.env_h is not None and "h" not in qargs:
                     qargs["h"] = qgym_adapter_instance.env_h
+
             else:
+                # Legacy static mode: use raw dataset_path
                 if "dataset_path" not in qargs:
                     qargs["dataset_path"] = str(qcfg.dataset_path)
 
@@ -284,12 +305,37 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
                 d_xi = int(getattr(adapter, "context_dim", 0))
         else:
             raise ValueError(f"Unknown dataset_type: {dataset_type}")
+
+        # ── Dataset status logging ─────────────────────────────────────
+        ds_name = getattr(dm, "dataset_name", None)
+        ds_path = getattr(dm, "dataset_path", None)
+        if ds_name:
+            try:
+                reg = DatasetRegistry()
+                exists = reg.exists(ds_name)
+                icon = "[x]" if exists else "[ ]"
+                print(
+                    f"[dataset] '{ds_name}' {icon} "
+                    f"{'present' if exists else 'not found'} "
+                    f"at {reg.resolve_path(ds_name)}"
+                )
+            except Exception:
+                pass
+        elif ds_path:
+            path_obj = Path(str(ds_path))
+            exists = path_obj.exists() and any(path_obj.rglob("*.pt"))
+            print(
+                f"[dataset] {ds_path} "
+                f"{'found' if exists else 'not found'}"
+            )
+
         run_logger.info(
             "datamodule_info",
             batch_size=dm.batch_size,
             n_samples=dm.n_samples,
             num_workers=dm._num_workers,
             max_queue=dm.max_queue,
+            dataset_name=ds_name or "legacy_path",
         )
 
         loss_cfg = cfg.get("loss", {})

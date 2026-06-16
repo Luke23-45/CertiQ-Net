@@ -2,192 +2,267 @@
 
 Usage
 -----
-    python -m certiqnet.data.qgym.collect_qgym --config configs/qgym/collection/reentrant_2.yaml
-    python -m certiqnet.data.qgym.collect_qgym --config configs/qgym/collection/reentrant_2.yaml --force
+    # Collect a registered dataset by name (primary workflow)
+    python -m certiqnet.data.qgym.collect_qgym collect reentrant_2
+    python -m certiqnet.data.qgym.collect_qgym collect reentrant_2 --force
 
-The script reads a ``QGymCollectionConfig`` YAML, spins up a QGym
-environment, collects states using the configured policy (or mixed-policy
-blend), splits into train / valid / test, and saves ``.pt`` shard files
-plus a ``metadata.yaml`` manifest.
+    # List all known datasets
+    python -m certiqnet.data.qgym.collect_qgym list
+
+    # Show collection status
+    python -m certiqnet.data.qgym.collect_qgym status
+    python -m certiqnet.data.qgym.collect_qgym status reentrant_2 --verbose
+
+    # Verify an existing dataset
+    python -m certiqnet.data.qgym.collect_qgym verify reentrant_2
+
+    # Print resolved config for a dataset
+    python -m certiqnet.data.qgym.collect_qgym config reentrant_2
+
+    # Legacy: collect from a collection YAML directly
+    python -m certiqnet.data.qgym.collect_qgym --config path/to/collection.yaml
+
+The primary workflow uses the **centralized dataset registry**
+(``configs/dataset/qgym/registry/*.yaml``) as the single source of truth.
 """
 
 from __future__ import annotations
 
 import argparse
-import math
+import json as json_mod
 import sys
-import time
 from pathlib import Path
 
-import numpy as np
-import torch
 import yaml
+
+# Ensure UTF-8 output on Windows consoles
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from certiqnet.adapters.qgym.adapter import QGymAdapter
 from certiqnet.adapters.qgym.config import QGymCollectionConfig
-from certiqnet.adapters.qgym.env_loader import compute_effective_mu
+from certiqnet.data.collection_manager import DatasetCollectionManager
+from certiqnet.data.registry import DatasetRegistry
 
 
-def _progress_bar(current: int, total: int, width: int = 40) -> str:
-    pct = current / max(total, 1)
-    filled = int(width * pct)
-    bar = "█" * filled + "░" * (width - filled)
-    return f"\r  [{bar}] {current:>8,}/{total:,} ({pct:.1%})"
+# ── Helpers ──────────────────────────────────────────────────────────
 
 
-def collect(cfg: QGymCollectionConfig) -> Path:
-    """Run the full collection pipeline and return the output directory."""
-    output_root = Path(cfg.output_dir) / cfg.dataset_name
-    if output_root.exists() and not cfg.force_collect:
-        print(f"Dataset already exists at {output_root}.  Use --force to overwrite.")
-        return output_root
-
-    # ── Build adapter ─────────────────────────────────────────────────
-    print(f"[collect] env config: {cfg.env_config_path}")
-    adapter = QGymAdapter(
-        env_config=str(cfg.env_config_path),
-        mode="online",
-        policy=cfg.policy,
-        policy_weights=cfg.policy_weights,
-        batch_size_env=1,
-        seed=cfg.seed,
-        device="cpu",
-    )
-    print(f"[collect] adapter: {adapter}")
-
-    total = cfg.n_steps + cfg.n_valid + cfg.n_test
-    print(f"[collect] collecting {total:,} states (train={cfg.n_steps:,}, "
-          f"valid={cfg.n_valid:,}, test={cfg.n_test:,})")
-
-    # ── Collect all states ────────────────────────────────────────────
-    gen = torch.Generator().manual_seed(cfg.seed)
-    t0 = time.perf_counter()
-    batch = adapter.sample_batch(
-        n_samples=total,
-        N=adapter.N,
-        mu=torch.ones(adapter.N),   # ignored by QGymAdapter
-        generator=gen,
-    )
-    elapsed = time.perf_counter() - t0
-    print(f"[collect] collected {total:,} states in {elapsed:.1f}s "
-          f"({total / max(elapsed, 0.001):.0f} states/s)")
-
-    Q_all = batch.Q.float()
-    cost_all = batch.cost.float()
-    mu_vec = batch.mu[0].float()     # shared across all rows
-
-    # ── Get holding cost vector if available ──────────────────────────
-    h_vec = adapter.env_h
-
-    # ── Split ─────────────────────────────────────────────────────────
-    perm = torch.randperm(total, generator=gen)
-    Q_all = Q_all[perm]
-    cost_all = cost_all[perm]
-
-    splits = {
-        "train": (0, cfg.n_steps),
-        "valid": (cfg.n_steps, cfg.n_steps + cfg.n_valid),
-        "test": (cfg.n_steps + cfg.n_valid, total),
-    }
-
-    # ── Save shards ──────────────────────────────────────────────────
-    for split_name, (lo, hi) in splits.items():
-        split_dir = output_root / split_name
-        split_dir.mkdir(parents=True, exist_ok=True)
-        # Remove old shards
-        for old in split_dir.glob("shard_*.pt"):
-            old.unlink()
-
-        Q_split = Q_all[lo:hi]
-        cost_split = cost_all[lo:hi]
-        n = Q_split.shape[0]
-        n_shards = max(1, math.ceil(n / cfg.shard_size))
-
-        for shard_i in range(n_shards):
-            s_lo = shard_i * cfg.shard_size
-            s_hi = min(s_lo + cfg.shard_size, n)
-            shard_data = {
-                "Q": Q_split[s_lo:s_hi],
-                "cost": cost_split[s_lo:s_hi],
-                "mu": mu_vec,
-            }
-            if h_vec is not None:
-                shard_data["h"] = h_vec
-            shard_path = split_dir / f"shard_{shard_i:04d}.pt"
-            torch.save(shard_data, shard_path)
-
-        print(f"  {split_name}: {n:,} states → {n_shards} shard(s)")
-
-    # ── Write metadata ───────────────────────────────────────────────
-    metadata = {
-        "dataset_name": cfg.dataset_name,
-        "env_config": str(cfg.env_config_path),
-        "n_train": cfg.n_steps,
-        "n_valid": cfg.n_valid,
-        "n_test": cfg.n_test,
-        "N": int(mu_vec.shape[0]),
-        "policy": cfg.policy,
-        "policy_weights": cfg.policy_weights if cfg.policy == "mixed" else None,
-        "seed": cfg.seed,
-        "shard_size": cfg.shard_size,
-        "collection_time_s": round(elapsed, 2),
-    }
-    meta_path = output_root / "metadata.yaml"
-    with open(meta_path, "w") as f:
-        yaml.dump(metadata, f, default_flow_style=False, sort_keys=False)
-    print(f"[collect] metadata saved to {meta_path}")
-
-    # ── Verify ───────────────────────────────────────────────────────
-    _verify(output_root)
-    return output_root
+def _print_status(status_data: dict[str, dict], verbose: bool = False) -> None:
+    """Pretty-print dataset status."""
+    for name, info in sorted(status_data.items()):
+        exists = info.get("exists", False)
+        path = info.get("path", "?")
+        icon = "[x]" if exists else "[ ]"
+        print(f"  {icon} {name}")
+        print(f"       path: {path}")
+        if "error" in info:
+            print(f"       error: {info['error']}")
+        elif verbose and exists and "metadata" in info:
+            meta = info["metadata"]
+            print(f"       N={meta.get('N', '?')}, "
+                  f"train={meta.get('n_train', '?'):,}, "
+                  f"valid={meta.get('n_valid', '?'):,}, "
+                  f"test={meta.get('n_test', '?'):,}")
+            print(f"       policy={meta.get('policy', '?')}, "
+                  f"seed={meta.get('seed', '?')}")
+            ct = meta.get("collection_time", "?")
+            print(f"       collected: {ct}")
+        print()
 
 
-def _verify(dataset_dir: Path) -> None:
-    """Quick integrity check on the saved dataset."""
-    from certiqnet.data.qgym.dataset import QGymDataset
-
-    for split in ("train", "valid", "test"):
-        split_dir = dataset_dir / split
-        if not split_dir.exists():
-            continue
-        ds = QGymDataset(str(dataset_dir), split=split)
-        q, mu, cost = ds[0]
-        assert q.dim() == 1, f"Expected 1-D Q, got {q.shape}"
-        assert cost.dim() == 0, f"Expected scalar cost, got {cost.shape}"
-        print(f"  ✓ {split}: {len(ds):,} states, N={ds.N}, Q[0]={q[:4].tolist()}...")
-    print("[collect] verification passed ✓")
+# ── Subcommands ──────────────────────────────────────────────────────
 
 
-# ── CLI ──────────────────────────────────────────────────────────────
+def cmd_collect(args: argparse.Namespace) -> None:
+    """Collect a dataset by registry name."""
+    registry = DatasetRegistry()
+    manager = DatasetCollectionManager(registry)
+    name = args.dataset_name
+
+    if name not in registry:
+        print(f"Error: unknown dataset '{name}'.")
+        print(f"Available: {', '.join(registry.list_datasets())}")
+        sys.exit(1)
+
+    spec = registry.get(name)
+    output = manager.collect(spec, force=args.force, skip_verify=args.no_verify)
+    print(f"\n[collect] done -> {output}")
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Collect a QGym dataset to disk."
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        required=True,
-        help="Path to a QGymCollectionConfig YAML.",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Overwrite an existing dataset.",
-    )
-    args = parser.parse_args()
+def cmd_list(args: argparse.Namespace) -> None:  # noqa: ARG001
+    """List all known datasets in the registry."""
+    registry = DatasetRegistry()
+    names = registry.list_datasets()
+    if not names:
+        print("No datasets found in registry.")
+        return
+    print(f"Known datasets ({len(names)}):")
+    for name in names:
+        spec = registry.get(name)
+        exists = registry.exists(name)
+        icon = "[x]" if exists else "[ ]"
+        path = registry.resolve_path(name)
+        print(f"  {icon} {name}  -> {path}")
+        print(f"       env: {spec.env}")
+        print(f"       collection: {spec.collection.n_steps:,} train + "
+              f"{spec.collection.n_valid:,} valid + {spec.collection.n_test:,} test"
+              f"  ({spec.collection.policy} policy)")
 
+
+def cmd_status(args: argparse.Namespace) -> None:
+    """Show collection status for all or one dataset."""
+    registry = DatasetRegistry()
+    data = registry.status(name=args.dataset_name)
+    _print_status(data, verbose=args.verbose)
+
+
+def cmd_verify(args: argparse.Namespace) -> None:
+    """Verify integrity of an existing dataset."""
+    registry = DatasetRegistry()
+    name = args.dataset_name
+    if not registry.exists(name):
+        print(f"Dataset '{name}' does not exist or is incomplete.")
+        sys.exit(1)
+    manager = DatasetCollectionManager(registry)
+    path = registry.resolve_path(name)
+    try:
+        n = manager.verify(path)
+        print(f"\n[verify] passed: {n} split(s) verified.")
+    except Exception as exc:
+        print(f"[verify] FAILED: {exc}")
+        sys.exit(1)
+
+
+def cmd_config(args: argparse.Namespace) -> None:
+    """Print the resolved dataset spec for a dataset."""
+    registry = DatasetRegistry()
+    name = args.dataset_name
+    if name not in registry:
+        print(f"Error: unknown dataset '{name}'.")
+        sys.exit(1)
+    spec = registry.get(name)
+    as_dict = registry.spec_to_dict(spec)
+    yaml.dump(as_dict, sys.stdout, default_flow_style=False, sort_keys=False)
+
+
+# ── Legacy compat ────────────────────────────────────────────────────
+
+
+def cmd_legacy_collect(args: argparse.Namespace) -> None:
+    """Legacy collection from a ``QGymCollectionConfig`` YAML file."""
     cfg = QGymCollectionConfig.from_yaml(args.config)
     if args.force:
         cfg.force_collect = True
 
-    output = collect(cfg)
-    print(f"\n[collect] done → {output}")
+    # Build a temporary DatasetSpec from the legacy config
+    from certiqnet.data.registry import CollectionConfig, DatasetSpec
+
+    spec = DatasetSpec(
+        name=cfg.dataset_name,
+        env=str(cfg.env_config_path),
+        output_dir=str(cfg.output_dir),
+        collection=CollectionConfig(
+            n_steps=cfg.n_steps,
+            n_valid=cfg.n_valid,
+            n_test=cfg.n_test,
+            shard_size=cfg.shard_size,
+            seed=cfg.seed,
+            policy=cfg.policy,
+            policy_weights=cfg.policy_weights,
+        ),
+    )
+    manager = DatasetCollectionManager()
+    output = manager.collect(spec, force=args.force)
+    print(f"\n[collect] done -> {output}")
+
+
+# ── Main CLI ─────────────────────────────────────────────────────────
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Collect and manage QGym datasets.",
+    )
+
+    subparsers = parser.add_subparsers(dest="command", help="Sub-command")
+
+    # ── collect ───────────────────────────────────────────────────────
+    p_collect = subparsers.add_parser(
+        "collect", help="Collect a dataset by registry name"
+    )
+    p_collect.add_argument("dataset_name", type=str, help="Registered dataset name")
+    p_collect.add_argument("--force", action="store_true", help="Overwrite existing")
+    p_collect.add_argument(
+        "--no-verify", action="store_true", help="Skip post-collection verification"
+    )
+
+    # ── list ──────────────────────────────────────────────────────────
+    subparsers.add_parser("list", help="List all known datasets")
+
+    # ── status ────────────────────────────────────────────────────────
+    p_status = subparsers.add_parser(
+        "status", help="Show collection status for all or one dataset"
+    )
+    p_status.add_argument(
+        "dataset_name", type=str, nargs="?", default=None, help="Dataset name (optional)"
+    )
+    p_status.add_argument(
+        "--verbose", "-v", action="store_true", help="Show detailed stats"
+    )
+
+    # ── verify ────────────────────────────────────────────────────────
+    p_verify = subparsers.add_parser(
+        "verify", help="Verify integrity of an existing dataset"
+    )
+    p_verify.add_argument("dataset_name", type=str, help="Dataset name")
+
+    # ── config ────────────────────────────────────────────────────────
+    p_config = subparsers.add_parser(
+        "config", help="Print resolved spec for a dataset"
+    )
+    p_config.add_argument("dataset_name", type=str, help="Dataset name")
+
+    # ── Legacy: --config ─────────────────────────────────────────────
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help=(
+            "[Legacy] Path to a QGymCollectionConfig YAML. "
+            "Replaced by ``collect <name>``."
+        ),
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="[Legacy] Overwrite existing dataset (used with --config).",
+    )
+
+    args = parser.parse_args()
+
+    # Dispatch
+    if args.command == "collect":
+        cmd_collect(args)
+    elif args.command == "list":
+        cmd_list(args)
+    elif args.command == "status":
+        cmd_status(args)
+    elif args.command == "verify":
+        cmd_verify(args)
+    elif args.command == "config":
+        cmd_config(args)
+    elif args.config:
+        # Legacy path
+        cmd_legacy_collect(args)
+    else:
+        parser.print_help()
 
 
 if __name__ == "__main__":
