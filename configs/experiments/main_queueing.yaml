@@ -1,0 +1,37 @@
+# @package _global_
+# ──────────────────────────────────────────────────────────────────────────────
+# configs/experiments/main_queueing.yaml
+#
+# Study runner config for the exact-certified queueing family.
+# Used by: studies/runner/families/main_queueing.py
+#
+# This config composes the full training + audit + baselines pipeline.
+# Override any value on the command line:
+#   python -m studies.runner.families.main_queueing \
+#       studies.runner.seeds="[42,43]" \
+#       studies.runner.baselines.include="[sed,max_weight]"
+# ──────────────────────────────────────────────────────────────────────────────
+defaults:
+  - /model: certiq_index
+  - /env: family_a
+  - /adapter: queueing
+  - /trainer: default
+  - /logger: csv
+  - /progress: default
+  - /runner: default
+  - /dataset: qgym/default
+  - /studies/runner: default
+  - _self_
+
+project:
+  name: certiq-net-main-queueing
+  seed: 42
+  output_root: outputs
+  experiment_name: main_queueing
+  run_id: null
+  resume_from_checkpoint: null
+  log_dir: null
+  save_checkpoints: true
+
+experiment_family: main_queueing
+certificate_status: exact

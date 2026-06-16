@@ -1,4 +1,8 @@
-"""Runner for the Main Queueing experiment family."""
+"""Runner for the Main Queueing experiment family.
+
+Thin entrypoint — delegates to the canonical runner at
+``studies.runner.families.main_queueing``.
+"""
 
 from __future__ import annotations
 

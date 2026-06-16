@@ -1,16 +1,11 @@
-"""Optimized main queueing study runner."""
+"""Backwards-compatibility shim — authoritative code has moved.
+
+The canonical implementation is now at:
+    studies.runner.families.main_queueing_optimized
+"""
 
 from __future__ import annotations
 
-from studies.runner.common import StudyRunnerSpec, run_study_family
+from studies.runner.families.main_queueing_optimized import SPEC, main  # noqa: F401
 
-SPEC = StudyRunnerSpec(
-    config_name="experiments/main_queueing_optimized",
-    stages=("train", "audit"),
-)
-
-
-def main(cli_overrides: list[str] | None = None) -> None:
-    """Run the optimized certified queueing pipeline."""
-    run_study_family(SPEC, cli_overrides or [])
-
+__all__ = ["SPEC", "main"]

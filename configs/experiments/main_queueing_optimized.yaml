@@ -1,0 +1,33 @@
+# @package _global_
+# ──────────────────────────────────────────────────────────────────────────────
+# configs/experiments/main_queueing_optimized.yaml
+#
+# Study runner config for the optimized queueing family.
+# Used by: studies/runner/families/main_queueing_optimized.py
+#
+# This config targets train + audit only (no baselines stage).
+# ──────────────────────────────────────────────────────────────────────────────
+defaults:
+  - /model: certiq_index
+  - /env: family_a
+  - /adapter: queueing
+  - /trainer: default
+  - /logger: csv
+  - /progress: default
+  - /runner: default
+  - /dataset: qgym/default
+  - /studies/runner: default
+  - _self_
+
+project:
+  name: certiq-net-main-queueing-optimized
+  seed: 42
+  output_root: outputs
+  experiment_name: main_queueing_optimized
+  run_id: null
+  resume_from_checkpoint: null
+  log_dir: null
+  save_checkpoints: true
+
+experiment_family: main_queueing_optimized
+certificate_status: exact

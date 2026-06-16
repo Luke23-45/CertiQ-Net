@@ -650,6 +650,29 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
         max_backlog=float(cfg.runner.max_backlog),
         show_progress=bool(cfg.runner.show_progress),
     )
+
+    # ── Baseline filter — read from cfg.studies.runner.baselines ────────────
+    baseline_include: list[str] | None = None
+    baseline_exclude: list[str] | None = None
+    try:
+        bl_cfg = cfg.studies.runner.baselines
+        raw_include = OmegaConf.to_container(bl_cfg.include, resolve=True)
+        raw_exclude = OmegaConf.to_container(bl_cfg.exclude, resolve=True)
+        if isinstance(raw_include, list):
+            baseline_include = [str(x) for x in raw_include]
+        if isinstance(raw_exclude, list) and raw_exclude:
+            baseline_exclude = [str(x) for x in raw_exclude]
+    except Exception:
+        run_logger.info(
+            "studies.runner config not found — using all baselines (default)",
+        )
+
+    run_logger.info(
+        "baseline_filter",
+        include=str(baseline_include),
+        exclude=str(baseline_exclude),
+    )
+
     metrics = run_baseline_comparison(
         env_name=str(cfg.env.mu_mode),
         N=int(cfg.env.N),
@@ -660,8 +683,11 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
         rollout=rollout,
         extra_models={"configured_model": model},
         adapter=adapter,
+        include=baseline_include,
+        exclude=baseline_exclude,
     )
     for row in metrics:
         run_logger.metric(row.flat())
     run_logger.flush()
     run_logger.table("Baseline Comparison", [row.flat() for row in metrics])
+
