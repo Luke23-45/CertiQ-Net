@@ -3,7 +3,7 @@ defaults:
   - env: family_a
   - adapter: queueing
   - trainer: default
-  - logger: wandb
+  - logger: csv
   - callbacks: default
   - progress: default
   - _self_
@@ -35,3 +35,5 @@ loss:
   policy_kl_weight: 0.01
   omega_ent: -0.001
   rollout_weight: 1.0
+  value_weight: 1.0
+  entropy_weight: 0.001

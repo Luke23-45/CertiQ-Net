@@ -3,6 +3,7 @@
 from certiqnet.adapters.base import AdapterBatch, DispatchAdapter, DispatchTuple
 from certiqnet.adapters.channel import ChannelAdapter
 from certiqnet.adapters.moe import MoEAdapter
+from certiqnet.adapters.qgym.adapter import QGymAdapter
 from certiqnet.adapters.queueing import QueueingAdapter
 from certiqnet.adapters.robotics import RoboticsAdapter
 
@@ -12,6 +13,7 @@ __all__ = [
     "DispatchAdapter",
     "DispatchTuple",
     "MoEAdapter",
+    "QGymAdapter",
     "QueueingAdapter",
     "RoboticsAdapter",
 ]

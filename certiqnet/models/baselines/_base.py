@@ -45,7 +45,7 @@ def make_lagrangian_diagnostics(
         usage_raw=nan,
         usage_final=nan,
         usage_cap=nan,
-        policy_entropy=-(pi * pi.clamp_min(1e-9).log()).sum(dim=-1),
+        policy_entropy=-(pi * pi.clamp_min(torch.finfo(pi.dtype).eps).log()).sum(dim=-1),
         selected_resource=pi.argmax(dim=-1),
         pressure_mean=torch.zeros_like(nan),
         pressure_max=torch.zeros_like(nan),

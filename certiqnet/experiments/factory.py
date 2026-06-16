@@ -17,12 +17,9 @@ from omegaconf import DictConfig, OmegaConf
 from certiqnet.dispatcher.certiq.index_model import CertiQIndexModel
 from certiqnet.models.baselines import (
     AnalyticBackbonePolicy,
-    JoinShortestWeightedQueue,
     QuadraticMinDrift,
     RandomPolicy,
     ShortestExpectedDelay,
-    SoftQuadraticMinDrift,
-    SoftSED,
 )
 
 T = TypeVar("T")
@@ -76,23 +73,9 @@ def build_model(cfg: DictConfig, N: int, d_xi: int = 0) -> torch.nn.Module:
         return RandomPolicy(
             N=N, beta=float(model_data.get("beta", 1.0)), C=float(model_data.get("C", float("inf")))
         )
-    if target.endswith("JoinShortestWeightedQueue"):
-        return JoinShortestWeightedQueue(
-            N=N, beta=float(model_data.get("beta", 1.0)), C=float(model_data.get("C", float("inf")))
-        )
     if target.endswith("ShortestExpectedDelay"):
         return ShortestExpectedDelay(
             N=N, beta=float(model_data.get("beta", 1.0)), C=float(model_data.get("C", float("inf")))
-        )
-    if target.endswith("SoftQuadraticMinDrift"):
-        return SoftQuadraticMinDrift(
-            N=N, tau=float(model_data.get("tau", 1.0)),
-            beta=float(model_data.get("beta", 1.0)), C=float(model_data.get("C", float("inf")))
-        )
-    if target.endswith("SoftSED"):
-        return SoftSED(
-            N=N, tau=float(model_data.get("tau", 1.0)),
-            beta=float(model_data.get("beta", 1.0)), C=float(model_data.get("C", float("inf")))
         )
     if target.endswith("QuadraticMinDrift"):
         return QuadraticMinDrift(

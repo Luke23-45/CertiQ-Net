@@ -28,6 +28,7 @@ from certiqnet.experiments.logging import BufferedExperimentLogger as Experiment
 from certiqnet.experiments.metrics import aggregate_metrics, save_metrics
 from certiqnet.experiments.paths import RunPaths, slugify
 from certiqnet.experiments.runner import experiment_name_from_cfg, prepare_run
+from certiqnet.data.qgym.datamodule import QGymDataModule
 from certiqnet.data.synthetic.datamodule import CertiQNetDataModule
 from certiqnet.train.common.loss import CertiQNetLoss
 from certiqnet.train.queueing.module import QueueingLightningModule
@@ -232,26 +233,58 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             OmegaConf.save(config=cfg, f=paths.configs / "resolved_config.yaml", resolve=True)
         torch.save(model.state_dict(), paths.artifacts / "initial_model_state.pt")
 
-        actual_batch_size = int(cfg.get("_batch_size", 64))
+        dataset_type = str(cfg.trainer.get("dataset_type", "synthetic"))
         num_workers_raw: object = resolved_trainer.get("_num_workers")
         num_workers: int | None = num_workers_raw if isinstance(num_workers_raw, int) else None
-        max_queue = int(cfg.runner.get("max_queue", 15))
-        resample_epoch = bool(cfg.runner.get("resample_every_epoch", True))
-        dm = CertiQNetDataModule(
-            N=int(cfg.env.N),
-            mu=mu,
-            batch_size=actual_batch_size,
-            n_samples=512,
-            num_workers=num_workers,
-            adapter=adapter,
-            seed=seed,
-            max_queue=max_queue,
-            resample_every_epoch=resample_epoch,
-            policy_buffer_max=int(cfg.trainer.policy_buffer_max),
-            synthetic_mix_fraction=float(cfg.trainer.synthetic_mix_fraction),
-            teacher_mix_fraction=float(cfg.trainer.teacher_mix_fraction),
-            policy_mix_fraction=float(cfg.trainer.policy_mix_fraction),
-        )
+
+        if dataset_type == "synthetic":
+            scfg = cfg.get("synthetic", {})
+            sargs = dict(scfg.get("init_args", {}))
+            dm = CertiQNetDataModule(mu=mu, adapter=adapter, **sargs)
+        elif dataset_type == "qgym":
+            from certiqnet.adapters.qgym.adapter import QGymAdapter
+
+            qcfg = cfg.get("qgym", {})
+            qargs = dict(qcfg.get("init_args", {}))
+            qgym_mode = qcfg.get("mode", "static")
+
+            # Ensure N is passed (required by QGymDataModule)
+            if "N" not in qargs:
+                qargs["N"] = int(cfg.env.N)
+
+            qgym_adapter_instance: QGymAdapter | None = None
+            if qgym_mode == "online":
+                policy_weights_raw = qcfg.get("policy_weights")
+                policy_weights = (
+                    dict(policy_weights_raw)
+                    if policy_weights_raw is not None
+                    else None
+                )
+                qgym_adapter_instance = QGymAdapter(
+                    env_config=str(qcfg.env_config),
+                    mode="online",
+                    policy=qcfg.get("policy", "mixed"),
+                    policy_weights=policy_weights,
+                    batch_size_env=qcfg.get("batch_size_env", 1),
+                    seed=seed,
+                    device=str(cfg.get("device", "cpu")),
+                )
+                qargs["qgym_adapter"] = qgym_adapter_instance
+                # Pass holding cost from adapter if available
+                if qgym_adapter_instance.env_h is not None and "h" not in qargs:
+                    qargs["h"] = qgym_adapter_instance.env_h
+            else:
+                qargs["dataset_path"] = str(qcfg.dataset_path)
+
+            dm = QGymDataModule(mu=mu, **qargs)
+
+            # Use the QGymAdapter for adapter-based logic in the pipeline
+            if adapter is None and qgym_adapter_instance is not None:
+                adapter = qgym_adapter_instance
+                adapter_name = "QGymAdapter"
+                d_xi = int(getattr(adapter, "context_dim", 0))
+        else:
+            raise ValueError(f"Unknown dataset_type: {dataset_type}")
         run_logger.info(
             "datamodule_info",
             batch_size=dm.batch_size,
@@ -298,7 +331,8 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             dual_lr_decay=float(getattr(cfg.trainer, "dual_lr_decay", 1.0)),
         )
 
-        if adapter_name == "QueueingAdapter":
+        if adapter_name in ("QueueingAdapter", "QGymAdapter"):
+            # QGym environments are queueing domains — use the same module
             lightning = QueueingLightningModule(**module_kwargs)
         elif adapter_name == "ChannelAdapter":
             lightning = ChannelLightningModule(**module_kwargs)

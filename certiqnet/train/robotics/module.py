@@ -16,6 +16,7 @@ class RoboticsLightningModule(BaseCertiQLightningModule):
 
     def _make_observation(self, Q: Tensor, mu: Tensor, xi: Tensor | None) -> tuple[Tensor, Tensor, Tensor | None]:
         dm = getattr(self.trainer, "datamodule", None)
-        if dm is not None and hasattr(dm, "adapter"):
-            return dm.adapter.make_observation(Q, mu)
+        adapter = getattr(dm, "adapter", None) if dm is not None else None
+        if adapter is not None:
+            return adapter.make_observation(Q, mu)
         return Q, mu, xi

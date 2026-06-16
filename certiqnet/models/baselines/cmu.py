@@ -1,4 +1,4 @@
-"""Stochastic route with softmax over expected-delay indices."""
+"""c-µ rule — static priority by service rate ``mu_i``."""
 
 import torch
 import torch.nn as nn
@@ -9,13 +9,10 @@ from certiqnet.dispatcher.types import DispatcherDiagnostics
 from certiqnet.models.baselines._base import baseline_device, expand_mu, make_lagrangian_diagnostics
 
 
-class SoftSED(nn.Module):
-    def __init__(
-        self, N: int, tau: float = 1.0, beta: float = 1.0, C: float = float("inf")
-    ) -> None:
+class CMuRule(nn.Module):
+    def __init__(self, N: int, beta: float = 1.0, C: float = float("inf")) -> None:
         super().__init__()
         self.N = N
-        self.tau = tau
         self.beta = beta
         self.C = C
 
@@ -27,7 +24,8 @@ class SoftSED(nn.Module):
         Q = Q.to(device=device)
         mu = mu.to(device=device, dtype=Q.dtype)
         mu_b = expand_mu(Q, mu)
-        logits = -((Q + 1.0) / mu_b) / self.tau
-        pi = torch.softmax(logits, dim=-1)
+        idx = (-mu_b.pow(self.beta)).argmin(dim=-1)
+        pi = torch.zeros_like(Q)
+        pi.scatter_(1, idx.unsqueeze(-1), 1.0)
         pi = normalize_policy(pi)
         return pi, make_lagrangian_diagnostics(pi, Q, mu_b, self.beta, self.C)

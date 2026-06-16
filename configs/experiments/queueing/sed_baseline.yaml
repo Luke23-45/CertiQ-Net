@@ -1,5 +1,6 @@
 seed_everything: 42
 trainer:
+  dataset_type: synthetic
   max_epochs: 1
   accelerator: auto
   devices: 1
@@ -18,6 +19,13 @@ model:
     loss_fn:
       class_path: certiqnet.train.common.loss.CertiQNetLoss
 data:
+  class_path: certiqnet.data.synthetic.datamodule.CertiQNetDataModule
+  init_args:
+    N: 10
+    batch_size: 64
+    n_samples: 512
+    seed: 42
+synthetic:
   class_path: certiqnet.data.synthetic.datamodule.CertiQNetDataModule
   init_args:
     N: 10

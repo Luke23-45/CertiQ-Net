@@ -23,8 +23,32 @@ if str(ROOT) not in sys.path:
 # ── CLI mode (LightningCLI, BGSL-style) ─────────────────────────────
 
 
+_CLI_TRAINER_KEYS = {
+    "accelerator", "strategy", "devices", "num_nodes", "precision",
+    "logger", "callbacks", "fast_dev_run", "max_epochs", "min_epochs",
+    "max_steps", "min_steps", "max_time", "limit_train_batches",
+    "limit_val_batches", "limit_test_batches", "limit_predict_batches",
+    "overfit_batches", "val_check_interval", "check_val_every_n_epoch",
+    "num_sanity_val_steps", "log_every_n_steps", "enable_checkpointing",
+    "enable_progress_bar", "enable_model_summary", "accumulate_grad_batches",
+    "gradient_clip_val", "gradient_clip_algorithm", "deterministic",
+    "benchmark", "inference_mode", "use_distributed_sampler", "profiler",
+    "detect_anomaly", "barebones", "plugins", "sync_batchnorm",
+    "reload_dataloaders_every_n_epochs", "default_root_dir",
+}
+
 def _run_cli(config_path: str) -> None:
-    sys.argv = ["certiqnet-train", "fit", "--config", config_path]
+    import tempfile
+    import yaml
+    raw = yaml.safe_load(open(config_path))
+    # Strip unknown keys from trainer
+    if "trainer" in raw:
+        raw["trainer"] = {k: v for k, v in raw["trainer"].items() if k in _CLI_TRAINER_KEYS}
+    known = {k: v for k, v in raw.items() if k in ("seed_everything", "trainer", "model", "data", "optimizer", "lr_scheduler", "ckpt_path")}
+    tf = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
+    yaml.dump(known, tf)
+    tf.close()
+    sys.argv = ["certiqnet-train", "fit", "--config", tf.name]
     from certiqnet.cli import main as cli_main
     cli_main()
 
@@ -32,22 +56,36 @@ def _run_cli(config_path: str) -> None:
 # ── Legacy mode (Hydra, backward-compat) ────────────────────────────
 
 
-def _run_legacy() -> None:
-    import hydra
-    from hydra.core.config_store import ConfigStore
-    from omegaconf import DictConfig
+def _run_legacy(config_path: str | None = None, overrides: list[str] | None = None) -> None:
+    from omegaconf import OmegaConf
 
     from certiqnet.experiments.pipeline import run_training
-    from certiqnet.utils.config_schemas import RootConfig
 
-    cs = ConfigStore.instance()
-    cs.store(name="root_config", node=RootConfig)
+    # Load base config
+    base_cfg = OmegaConf.load(ROOT / "configs" / "config.yaml")
+    cfg = OmegaConf.create()
+    defaults = base_cfg.get("defaults", [])
+    for d in defaults:
+        if isinstance(d, str):
+            continue  # skip special keys like _self_
+        for key, val in d.items():
+            if key == "_self_":
+                continue
+            p = ROOT / "configs" / key / f"{val}.yaml"
+            if p.exists():
+                sub = OmegaConf.load(p)
+                cfg = OmegaConf.merge(cfg, sub)
+    cfg = OmegaConf.merge(cfg, base_cfg)
 
-    @hydra.main(version_base="1.3", config_path="../configs", config_name="config")
-    def main(cfg: DictConfig) -> None:
-        run_training(cfg, cwd=ROOT)
+    if config_path:
+        exp_cfg = OmegaConf.load(config_path)
+        cfg = OmegaConf.merge(cfg, exp_cfg)
 
-    main()
+    if overrides:
+        overrides_merged = OmegaConf.from_cli(overrides)
+        cfg = OmegaConf.merge(cfg, overrides_merged)
+
+    run_training(cfg, cwd=ROOT)
 
 
 # ── Dispatch ────────────────────────────────────────────────────────
@@ -64,6 +102,8 @@ if __name__ == "__main__":
             print("ERROR: --cli requires --config <path>")
             sys.exit(1)
         _run_cli(args.config)
+    elif args.config:
+        _run_legacy(config_path=args.config)
     else:
         sys.argv = [sys.argv[0]] + unknown
         _run_legacy()

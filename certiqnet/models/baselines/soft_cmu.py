@@ -1,4 +1,4 @@
-"""Stochastic route with softmax over quadratic-drift indices."""
+"""Stochastic route with softmax over c-µ priority indices."""
 
 import torch
 import torch.nn as nn
@@ -9,7 +9,7 @@ from certiqnet.dispatcher.types import DispatcherDiagnostics
 from certiqnet.models.baselines._base import baseline_device, expand_mu, make_lagrangian_diagnostics
 
 
-class SoftQuadraticMinDrift(nn.Module):
+class SoftCMuRule(nn.Module):
     def __init__(
         self, N: int, tau: float = 1.0, beta: float = 1.0, C: float = float("inf")
     ) -> None:
@@ -27,7 +27,7 @@ class SoftQuadraticMinDrift(nn.Module):
         Q = Q.to(device=device)
         mu = mu.to(device=device, dtype=Q.dtype)
         mu_b = expand_mu(Q, mu)
-        logits = -((2.0 * Q + 1.0) / mu_b) / self.tau
+        logits = mu_b.pow(self.beta) / self.tau
         pi = torch.softmax(logits, dim=-1)
         pi = normalize_policy(pi)
         return pi, make_lagrangian_diagnostics(pi, Q, mu_b, self.beta, self.C)

@@ -147,8 +147,9 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
     def _make_observation(self, Q: Tensor, mu: Tensor, xi: Tensor | None) -> tuple[Tensor, Tensor, Tensor | None]:
         """Override in domain subclasses to apply adapter transforms."""
         dm = getattr(self.trainer, "datamodule", None)
-        if dm is not None and hasattr(dm, "adapter"):
-            return dm.adapter.make_observation(Q, mu)
+        adapter = getattr(dm, "adapter", None) if dm is not None else None
+        if adapter is not None:
+            return adapter.make_observation(Q, mu)
         return Q, mu, xi
 
     # ── Training step ───────────────────────────────────────────────

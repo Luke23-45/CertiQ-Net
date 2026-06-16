@@ -28,6 +28,7 @@ class EnvConfig:
 
 @dataclass
 class TrainerConfig:
+    dataset_type: str = "synthetic"
     max_epochs: int = 200
     accelerator: str = "auto"
     devices: int = 1

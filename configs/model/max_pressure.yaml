@@ -1,0 +1,5 @@
+model:
+  class_path: certiqnet.models.baselines.MaximumPressure
+  init_args:
+    N: 10
+    beta: 1.0

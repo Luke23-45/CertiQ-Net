@@ -1,6 +1,12 @@
+# @package _global_
 seed_everything: 42
+env:
+  N: 6
+  mu_mode: fixed
+  mu_fixed: [0.125, 0.5, 0.25, 0.16666667, 0.14285715, 1.0]
+  lam: 0.8
 trainer:
-  dataset_type: synthetic
+  dataset_type: qgym
   max_epochs: 200
   accelerator: auto
   devices: 1
@@ -9,7 +15,7 @@ trainer:
   val_check_interval: 0.25
   log_every_n_steps: 10
 model:
-  class_path: certiqnet.train.channel.module.ChannelLightningModule
+  class_path: certiqnet.train.queueing.module.QueueingLightningModule
   init_args:
     lr: 3.0e-4
     weight_decay: 1.0e-5
@@ -21,11 +27,11 @@ model:
     entropy_warmup_epochs: 20
     imitation_warmup_epochs: 20
     entropy_weight: 0.001
-    lam: 1.0
+    lam: 8.0
     model:
       class_path: certiqnet.dispatcher.certiq.index_model.CertiQIndexModel
       init_args:
-        N: 10
+        N: 6
         hidden_dim: 128
         tau: 1.0
         exploration_temperature: 1.5
@@ -38,7 +44,7 @@ model:
     loss_fn:
       class_path: certiqnet.train.common.loss.CertiQNetLoss
       init_args:
-        omega_bc: 1.0
+        omega_bc: 0.0
         omega_action: 1.5
         omega_margin: 0.1
         omega_usage: 0.1
@@ -46,17 +52,18 @@ model:
         policy_kl_weight: 0.05
         value_weight: 1.0
         entropy_weight: 0.001
-data:
-  class_path: certiqnet.data.synthetic.datamodule.CertiQNetDataModule
+qgym:
+  class_path: certiqnet.data.qgym.datamodule.QGymDataModule
   init_args:
-    N: 10
+    N: 6
     batch_size: 64
     n_samples: 512
     seed: 42
-synthetic:
-  class_path: certiqnet.data.synthetic.datamodule.CertiQNetDataModule
-  init_args:
-    N: 10
-    batch_size: 64
-    n_samples: 512
-    seed: 42
+    max_queue: 15
+    resample_every_epoch: true
+    policy_buffer_max: 4096
+    teacher_mix_fraction: 0.25
+    policy_mix_fraction: 0.25
+    hard_state_fraction: 0.75
+  mode: static
+  dataset_path: dataset/qgym/reentrant_2

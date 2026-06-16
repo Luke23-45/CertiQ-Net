@@ -1,5 +1,6 @@
 # @package _global_
 trainer:
+  dataset_type: synthetic
   max_epochs: 200
   accelerator: auto
   devices: 1

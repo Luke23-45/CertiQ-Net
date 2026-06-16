@@ -13,12 +13,14 @@ from certiqnet.experiments.metrics import ExperimentMetrics, aggregate_metrics, 
 from certiqnet.experiments.progress import progress
 from certiqnet.models.baselines import (
     AnalyticBackbonePolicy,
-    JoinShortestWeightedQueue,
+    CMuRule,
+    MaxWeight,
+    MaximumPressure,
     QuadraticMinDrift,
     RandomPolicy,
     ShortestExpectedDelay,
-    SoftQuadraticMinDrift,
-    SoftSED,
+    SoftCMuRule,
+    SoftMaxWeight,
 )
 from certiqnet.simulation.ctmc import CTMCEnvironment
 
@@ -48,15 +50,17 @@ class RolloutConfig:
 
 
 def build_baseline_suite(N: int, beta: float = 1.0) -> dict[str, torch.nn.Module]:
-    """Return required analytic baseline policies."""
+    """Return analytic baseline policies."""
     return {
         "random": RandomPolicy(N=N, beta=beta),
-        "jswq": JoinShortestWeightedQueue(N=N, beta=beta),
         "backbone": AnalyticBackbonePolicy(N=N, beta=beta),
         "sed": ShortestExpectedDelay(N=N, beta=beta),
         "qmd": QuadraticMinDrift(N=N, beta=beta),
-        "soft_sed": SoftSED(N=N, tau=1.0, beta=beta),
-        "soft_qmd": SoftQuadraticMinDrift(N=N, tau=1.0, beta=beta),
+        "c_mu": CMuRule(N=N, beta=beta),
+        "soft_c_mu": SoftCMuRule(N=N, tau=1.0, beta=beta),
+        "max_weight": MaxWeight(N=N, beta=beta),
+        "soft_max_weight": SoftMaxWeight(N=N, tau=1.0, beta=beta),
+        "max_pressure": MaximumPressure(N=N, beta=beta),
     }
 
 
@@ -71,13 +75,25 @@ def evaluate_policy(
     mu: torch.Tensor,
     rollout: RolloutConfig,
     adapter: DispatchAdapter | None = None,
+    qgym_test_states: torch.Tensor | None = None,
 ) -> ExperimentMetrics:
-    """Run one CTMC rollout and return dual metrics."""
+    """Run one CTMC rollout and return dual metrics.
+
+    When ``qgym_test_states`` is provided, the CTMC is initialised to
+    those queue lengths (drawn from the QGym test set) rather than
+    starting from zero.
+    """
     torch.manual_seed(seed)
     if hasattr(model, "reset_dispatch_state"):
         model.reset_dispatch_state()
     adapter = adapter if adapter is not None else QueueingAdapter(assumptions_satisfied=True)
     env = CTMCEnvironment(N=N, lam=lam, mu=mu, B=rollout.batch_size)
+    # Initialise from QGym test states when available
+    if qgym_test_states is not None:
+        n_avail = qgym_test_states.shape[0]
+        gen = torch.Generator().manual_seed(seed)
+        idx = torch.randperm(n_avail, generator=gen)[:rollout.batch_size]
+        env.reset(qgym_test_states[idx].float().clone())
     queue_trace: list[torch.Tensor] = []
     cost_trace: list[torch.Tensor] = []
     dt_trace: list[torch.Tensor] = []
@@ -130,8 +146,25 @@ def run_baseline_comparison(
     rollout: RolloutConfig,
     extra_models: dict[str, torch.nn.Module] | None = None,
     adapter: DispatchAdapter | None = None,
+    qgym_test_path: str | Path | None = None,
 ) -> list[ExperimentMetrics]:
-    """Evaluate baseline suite plus optional learned models and persist results."""
+    """Evaluate baseline suite plus optional learned models and persist results.
+
+    When ``qgym_test_path`` points to a ``test.pt`` file inside a
+    ``dataset/qgym/<name>/`` directory, the rollouts start from the
+    QGym test-state distribution instead of zero-initialised queues.
+    """
+    qgym_test_states: torch.Tensor | None = None
+    if qgym_test_path is not None:
+        test_path = Path(qgym_test_path)
+        if test_path.is_file():
+            data = torch.load(test_path, weights_only=True)
+            qgym_test_states = data["Q"]
+        else:
+            test_file = test_path / "test" / "test.pt"
+            if test_file.exists():
+                data = torch.load(test_file, weights_only=True)
+                qgym_test_states = data["Q"]
     models = build_baseline_suite(N=N)
     if extra_models:
         models.update(extra_models)
@@ -147,6 +180,7 @@ def run_baseline_comparison(
             mu=mu,
             rollout=rollout,
             adapter=copy.deepcopy(adapter) if adapter is not None else None,
+            qgym_test_states=qgym_test_states,
         )
         for name, model in models.items()
     ]
