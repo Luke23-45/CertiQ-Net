@@ -1,0 +1,9 @@
+
+trainer:
+  class_path: pytorch_lightning.Trainer
+  init_args:
+    max_epochs: 1
+model:
+  class_path: certiqnet.train.queueing.module.QueueingLightningModule
+data:
+  class_path: certiqnet.data.synthetic.datamodule.CertiQNetDataModule

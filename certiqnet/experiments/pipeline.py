@@ -236,13 +236,13 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
         num_workers: int | None = num_workers_raw if isinstance(num_workers_raw, int) else None
 
         if dataset_type == "synthetic":
-            scfg = cfg.get("synthetic", {})
+            scfg = cfg.get("data", {})
             sargs = dict(scfg.get("init_args", {}))
             dm = CertiQNetDataModule(mu=mu, adapter=adapter, **sargs)
         elif dataset_type == "qgym":
             from certiqnet.adapters.qgym.adapter import QGymAdapter
 
-            qcfg = cfg.get("qgym", {})
+            qcfg = cfg.get("data", {})
             qargs = dict(qcfg.get("init_args", {}))
             qgym_mode = qcfg.get("mode", "static")
 
@@ -272,7 +272,8 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
                 if qgym_adapter_instance.env_h is not None and "h" not in qargs:
                     qargs["h"] = qgym_adapter_instance.env_h
             else:
-                qargs["dataset_path"] = str(qcfg.dataset_path)
+                if "dataset_path" not in qargs:
+                    qargs["dataset_path"] = str(qcfg.dataset_path)
 
             dm = QGymDataModule(mu=mu, **qargs)
 
@@ -291,15 +292,16 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             max_queue=dm.max_queue,
         )
 
+        loss_cfg = cfg.get("loss", {})
         loss_fn = CertiQNetLoss(
-            omega_bc=float(cfg.loss.omega_bc),
-            omega_action=float(cfg.loss.get("omega_action", 1.5)),
-            omega_margin=float(cfg.loss.get("omega_margin", 0.1)),
-            omega_usage=float(cfg.loss.omega_usage),
-            rollout_weight=float(cfg.loss.rollout_weight),
-            policy_kl_weight=float(cfg.loss.policy_kl_weight),
-            value_weight=float(cfg.loss.value_weight),
-            entropy_weight=float(cfg.loss.entropy_weight),
+            omega_bc=float(loss_cfg.get("omega_bc", 1.0)),
+            omega_action=float(loss_cfg.get("omega_action", 1.5)),
+            omega_margin=float(loss_cfg.get("omega_margin", 0.1)),
+            omega_usage=float(loss_cfg.get("omega_usage", 0.1)),
+            rollout_weight=float(loss_cfg.get("rollout_weight", 1.0)),
+            policy_kl_weight=float(loss_cfg.get("policy_kl_weight", 0.05)),
+            value_weight=float(loss_cfg.get("value_weight", 1.0)),
+            entropy_weight=float(loss_cfg.get("entropy_weight", 0.001)),
         )
 
         module_kwargs = dict(
@@ -319,7 +321,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             imitation_decay_rate=float(getattr(cfg.trainer, "imitation_decay_rate", 0.96)),
             target_kl_cert=float(getattr(cfg.trainer, "target_kl_cert", 0.01)),
             initial_policy_kl_weight=float(getattr(cfg.trainer, "initial_policy_kl_weight", 0.05)),
-            entropy_weight=float(cfg.loss.entropy_weight),
+            entropy_weight=float(loss_cfg.get("entropy_weight", 0.001)),
             lam=float(cfg.env.lam),
             dual_lambda_lr=float(getattr(cfg.trainer, "dual_lambda_lr", 0.01)),
             dual_lambda_init=float(getattr(cfg.trainer, "dual_lambda_init", 0.0)),

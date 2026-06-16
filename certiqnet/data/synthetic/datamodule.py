@@ -43,6 +43,7 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
         teacher_mix_fraction: float = 0.25,
         policy_mix_fraction: float = 0.25,
         hard_state_fraction: float = 0.5,
+        adversarial_fraction: float = 0.25,
     ) -> None:
         super().__init__()
         self.N = int(N)
@@ -59,6 +60,7 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
         self.teacher_mix_fraction = float(teacher_mix_fraction)
         self.policy_mix_fraction = float(policy_mix_fraction)
         self.hard_state_fraction = float(hard_state_fraction)
+        self.adversarial_fraction = float(adversarial_fraction)
         self.policy_buffer_max = int(policy_buffer_max)
         self._epoch = 0
         self.train_ds: TensorDataset | None = None
@@ -119,7 +121,7 @@ class CertiQNetDataModule(pl.LightningDataModule if pl is not None else object):
             easy_synthetic_count = synthetic_count - hard_count
         teacher_count = max(0, int(self.n_samples * self.teacher_mix_fraction))
         policy_count = max(0, int(self.n_samples * self.policy_mix_fraction))
-        adversarial_count = max(32, self.n_samples // 4)
+        adversarial_count = max(1, int(self.n_samples * self.adversarial_fraction))
 
         synthetic_easy = (
             self.adapter.sample_batch(

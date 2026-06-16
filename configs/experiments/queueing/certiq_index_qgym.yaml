@@ -12,9 +12,3 @@ defaults:
 
 seed_everything: 42
 
-# QGym-specific trainer adjustments
-trainer:
-  # Slightly higher hard-state fraction when using QGym states
-  hard_state_fraction: 0.75
-  # No synthetic padding when using QGym as primary data source
-  synthetic_mix_fraction: 0.0

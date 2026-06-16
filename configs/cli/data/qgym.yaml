@@ -17,5 +17,6 @@ data:
     teacher_mix_fraction: 0.25
     policy_mix_fraction: 0.25
     hard_state_fraction: 0.75      # higher hard-state density for QGym
+    adversarial_fraction: 0.25
     synthetic_mix_fraction: 0.0    # QGym is primary source — no synthetic padding
     dataset_path: dataset/qgym/reentrant_2

@@ -1,6 +1,8 @@
 # @package _global_
+# Canonical trainer params — kept self-contained since the legacy
+# OmegaConf loader does not resolve Hydra `defaults:` nesting.
 trainer:
-  dataset_type: synthetic
+  # ── PyTorch Lightning Trainer ─────────────────────────────────────
   max_epochs: 200
   accelerator: auto
   devices: 1
@@ -8,22 +10,47 @@ trainer:
   gradient_clip_val: 0.0
   val_check_interval: 0.25
   log_every_n_steps: 10
-  lr: 0.0003
-  weight_decay: 0.00001
+
+  # ── Optimization ─────────────────────────────────────────────────
+  lr: 3.0e-4
+  weight_decay: 1.0e-5
+
+  # ── Data source ──────────────────────────────────────────────────
+  dataset_type: synthetic
+
+  # ── RL / Rollout ─────────────────────────────────────────────────
   rollout_horizon: 64
+  gamma: 0.99
+  gae_lambda: 0.95
+  val_horizon_max: 8
+
+  # ── PPO ──────────────────────────────────────────────────────────
+  use_ppo: true
+  ppo_epochs: 4
+  ppo_clip_epsilon: 0.2
+  ppo_manual_clip_val: 1.0
+
+  # ── Curriculum / Warmup ──────────────────────────────────────────
   entropy_warmup_epochs: 20
   imitation_warmup_epochs: 20
+  critic_bootstrap_epochs: 3
+  imitation_decay_rate: 0.96
+  expert_mode: qmd
+
+  # ── Lagrangian Dual Variable ─────────────────────────────────────
+  dual_lambda_lr: 0.01
+  dual_lambda_init: 0.0
+  dual_lambda_momentum: 0.9
+  dual_lr_warmup_steps: 10
+  dual_lambda_max: 10.0
+  dual_lr_decay: 1.0
+  target_kl_cert: 0.01
+  initial_policy_kl_weight: 0.05
+
+  # ── Data Mix ─────────────────────────────────────────────────────
   policy_buffer_max: 4096
   policy_mix_fraction: 0.25
   teacher_mix_fraction: 0.25
   synthetic_mix_fraction: 0.5
-  use_ppo: true
-  ppo_clip_epsilon: 0.2
-  ppo_epochs: 4
-  ppo_batch_size: 64
-  ppo_manual_clip_val: 1.0
-  critic_bootstrap_epochs: 3
-  imitation_decay_rate: 0.96
-  target_kl_cert: 0.01
-  initial_policy_kl_weight: 0.05
-  expert_mode: qmd
+  hard_state_fraction: 0.5
+  max_queue: 15

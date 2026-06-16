@@ -3,81 +3,17 @@
 # configs/experiments/channel/certiq_index.yaml
 #
 # CertiQ-Net training on the channel domain.
-# Inherits the full synthetic data module and overrides only what the
-# channel domain needs to differ from the queueing domain.
+# Override the model class and N.
 # ──────────────────────────────────────────────────────────────────────────────
 defaults:
-  - override /dataset: synthetic/default
+  - /trainer: default
+  - /model: certiq_index
+  - /data: synthetic
 
 seed_everything: 42
 
-trainer:
-  max_epochs: 200
-  accelerator: auto
-  devices: 1
-  precision: bf16-mixed
-  gradient_clip_val: 0.0
-  val_check_interval: 0.25
-  log_every_n_steps: 10
-
 model:
   class_path: certiqnet.train.channel.module.ChannelLightningModule
-  init_args:
-    lr: 3.0e-4
-    weight_decay: 1.0e-5
-    rollout_horizon: 64
-    gamma: 0.99
-    gae_lambda: 0.95
-    val_horizon_max: 8
-    use_ppo: true
-    ppo_epochs: 4
-    ppo_clip_epsilon: 0.2
-    ppo_manual_clip_val: 1.0
-    entropy_warmup_epochs: 20
-    imitation_warmup_epochs: 20
-    critic_bootstrap_epochs: 3
-    imitation_decay_rate: 0.96
-    expert_mode: qmd
-    entropy_weight: 0.001
-    dual_lambda_lr: 0.01
-    dual_lambda_init: 0.0
-    dual_lambda_momentum: 0.9
-    dual_lr_warmup_steps: 10
-    dual_lambda_max: 10.0
-    dual_lr_decay: 1.0
-    target_kl_cert: 0.01
-    initial_policy_kl_weight: 0.05
-    lam: 1.0                  # channel domain default arrival rate
-
-    model:
-      class_path: certiqnet.dispatcher.certiq.index_model.CertiQIndexModel
-      init_args:
-        hidden_dim: 128
-        tau: 1.0
-        exploration_temperature: 1.5
-        C: 20.0
-        beta: 1.0
-        encoder_layers: 2
-        num_heads: 4
-        num_inducing_points: 4
-        dropout: 0.0
-        cost_fn: sed
-        constraint_mode: lagrangian
-        cost_learner_hidden_dim: 64
-        d_xi: 0
-        # N is set via data module; do not hardcode here
-
-    loss_fn:
-      class_path: certiqnet.train.common.loss.CertiQNetLoss
-      init_args:
-        omega_bc: 1.0
-        omega_action: 1.5
-        omega_margin: 0.1
-        omega_usage: 0.1
-        rollout_weight: 1.0
-        policy_kl_weight: 0.05
-        value_weight: 1.0
-        entropy_weight: 0.001
 
 # Data: N is set per-run; do not hardcode N inside this experiment config.
 # Override via CLI: --data.init_args.N <value>

@@ -109,6 +109,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         teacher_mix_fraction: float = 0.25,
         policy_mix_fraction: float = 0.25,
         hard_state_fraction: float = 0.5,
+        adversarial_fraction: float = 0.25,
         dataset_path: str | Path | None = None,
         qgym_adapter: QGymAdapter | None = None,
         h: Tensor | None = None,
@@ -133,6 +134,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         self.teacher_mix_fraction = float(teacher_mix_fraction)
         self.policy_mix_fraction = float(policy_mix_fraction)
         self.hard_state_fraction = float(hard_state_fraction)
+        self.adversarial_fraction = float(adversarial_fraction)
 
         frac_sum = (
             self.synthetic_mix_fraction
@@ -340,7 +342,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         synthetic_count = max(
             0, int(self.n_samples * self.synthetic_mix_fraction)
         )
-        adversarial_count = max(32, self.n_samples // 4)
+        adversarial_count = max(1, int(self.n_samples * self.adversarial_fraction))
 
         # ── QGym source ──────────────────────────────────────────────
         if self._online and self.qgym_adapter is not None and easy_qgym_count > 0:

@@ -42,35 +42,52 @@ def _run_cli(config_path: str, unknown_args: list[str]) -> None:
     import tempfile
     import yaml
     from omegaconf import OmegaConf
-    
-    # Load with OmegaConf to natively support Hydra-like 'defaults:'
+
     cfg = OmegaConf.create()
     exp_cfg = OmegaConf.load(config_path)
-    defaults = exp_cfg.get("defaults", [])
-    
-    for d in defaults:
-        if isinstance(d, str):
-            continue
-        for key, val in d.items():
-            if key == "override /dataset":
-                key = "data"
-            p = ROOT / "configs" / "cli" / key / f"{val}.yaml"
-            if not p.exists():
-                p = ROOT / "configs" / "cli" / f"{val}.yaml"
-            if p.exists():
-                sub = OmegaConf.load(p)
-                cfg = OmegaConf.merge(cfg, sub)
-    
-    # Remove defaults node and merge the rest of the experiment config
+
+    def _merge_defaults(source_cfg, source_path: str, seen: set[str]) -> None:
+        nonlocal cfg
+        defaults = source_cfg.get("defaults", [])
+        for d in defaults:
+            if isinstance(d, str):
+                p = Path(source_path).resolve().parent / f"{d}.yaml"
+                resolved = str(p.resolve())
+                if p.exists() and resolved not in seen:
+                    seen.add(resolved)
+                    sub = OmegaConf.load(p)
+                    _merge_defaults(sub, resolved, seen)
+                    if "defaults" in sub:
+                        del sub["defaults"]
+                    cfg = OmegaConf.merge(cfg, sub)
+            else:
+                for key, val in d.items():
+                    if key == "override /dataset":
+                        key = "data"
+                    safe_key = key.lstrip("/")
+                    p = ROOT / "configs" / "cli" / safe_key / f"{val}.yaml"
+                    if not p.exists():
+                        p = ROOT / "configs" / "cli" / f"{val}.yaml"
+                    if p.exists():
+                        resolved = str(p.resolve())
+                        if resolved not in seen:
+                            seen.add(resolved)
+                            sub = OmegaConf.load(p)
+                            _merge_defaults(sub, resolved, seen)
+                            if "defaults" in sub:
+                                del sub["defaults"]
+                            cfg = OmegaConf.merge(cfg, sub)
+
+    _merge_defaults(exp_cfg, config_path, set())
+
     if "defaults" in exp_cfg:
         del exp_cfg["defaults"]
     cfg = OmegaConf.merge(cfg, exp_cfg)
-    
-    # Write composed config to tempfile for LightningCLI
+
     tf = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
     yaml.dump(OmegaConf.to_container(cfg, resolve=True), tf)
     tf.close()
-    
+
     sys.argv = ["certiqnet-train", "fit", "--config", tf.name] + unknown_args
     from certiqnet.cli import main as cli_main
     cli_main()
