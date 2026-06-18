@@ -390,11 +390,11 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             callbacks.append(
                 pl.callbacks.ModelCheckpoint(
                     dirpath=str(paths.checkpoints),
-                    filename="{epoch:04d}",
+                    filename="{epoch:04d}-{val/selection_score:.4f}",
                     monitor="val/selection_score",
                     mode="min",
                     save_last=True,
-                    save_top_k=3,
+                    save_top_k=5,
                     every_n_epochs=1,
                 )
             )
@@ -478,7 +478,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
                         # Strip "model." prefix from Lightning state_dict keys
                         raw_sd = best_state["state_dict"]
                         cleaned = {
-                            k.removeprefix("model."): v for k, v in raw_sd.items()
+                            k.removeprefix("model."): v for k, v in raw_sd.items() if k.startswith("model.")
                         }
                         model.load_state_dict(cleaned)
                     else:
