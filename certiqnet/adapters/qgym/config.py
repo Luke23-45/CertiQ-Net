@@ -7,6 +7,8 @@ from typing import Literal
 
 import yaml
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
 
 # ---------------------------------------------------------------------------
 #  QGym environment configuration
@@ -243,9 +245,10 @@ def resolve_env_config_path(env_name_or_path: str) -> Path:
     """Resolve an env config reference to an actual YAML file path.
 
     Checks (in order):
-      1. ``configs/qgym/env/<name>.yaml``
-      2. ``extern/QGym/configs/env/<name>.yaml``
+      1. ``configs/qgym/env/<name>.yaml`` (relative to CWD)
+      2. ``extern/QGym/configs/env/<name>.yaml`` (relative to CWD)
       3. The path as-is
+      4. Same as 1-3 but relative to the project root
     """
     candidates = [
         Path("configs/qgym/env") / f"{env_name_or_path}.yaml",
@@ -256,6 +259,9 @@ def resolve_env_config_path(env_name_or_path: str) -> Path:
     if "." in env_name_or_path:
         name_stem = env_name_or_path.rsplit(".", 1)[0]
         candidates.insert(2, Path(name_stem).with_suffix(".yaml"))
+    # Fallback: check relative to project root (handles non-root CWD on cloud)
+    project_fallbacks = list(candidates)
+    candidates.extend(_PROJECT_ROOT / c for c in project_fallbacks)
     for candidate in candidates:
         if candidate.exists():
             return candidate.resolve()
