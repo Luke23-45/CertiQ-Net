@@ -130,7 +130,9 @@ def run_stage(
     t0 = time.monotonic()
     try:
         fn()
-    except Exception:
+    except KeyboardInterrupt:
+        raise
+    except BaseException:
         elapsed = time.monotonic() - t0
         _print(f"[red bold]✗ Stage [{index}/{total}] failed in {_fmt_elapsed(elapsed)}[/red bold]")
         traceback.print_exc()
@@ -241,7 +243,9 @@ def run_study_family(
                     config_name=spec.config_name,
                     dry_run=dry_run,
                 )
-            except Exception:
+            except KeyboardInterrupt:
+                raise
+            except BaseException:
                 seed_ok = False
                 if failure_mode == "stop":
                     raise

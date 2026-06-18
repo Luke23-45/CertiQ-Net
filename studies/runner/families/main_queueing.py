@@ -23,6 +23,7 @@ Examples:
 from __future__ import annotations
 
 import sys
+import traceback
 
 from studies.runner.cli import parse_and_run
 from studies.runner.common import StudyRunnerSpec
@@ -35,7 +36,17 @@ SPEC = StudyRunnerSpec(
 
 def main(cli_overrides: list[str] | None = None) -> None:
     """Run the exact-certified queueing pipeline."""
-    parse_and_run(SPEC, argv=cli_overrides)
+    try:
+        parse_and_run(SPEC, argv=cli_overrides)
+    except SystemExit:
+        raise
+    except KeyboardInterrupt:
+        print("\nInterrupted by user.", file=sys.stderr)
+        sys.exit(130)
+    except BaseException as e:
+        print(f"\nFatal error: {e}", file=sys.stderr)
+        traceback.print_exc()
+        sys.exit(1)
 
 
 if __name__ == "__main__":
