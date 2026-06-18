@@ -44,6 +44,11 @@ def _ensure_qgym_importable() -> None:
         if p not in sys.path:
             sys.path.insert(0, p)
 
+    # Apply runtime patches to the QGym submodule before any import.
+    from certiqnet.utils.qgym_patch import apply_qgym_patches
+
+    apply_qgym_patches()
+
 
 # ---------------------------------------------------------------------------
 #  Environment instantiation
