@@ -1,3 +1,0 @@
-__import__:
-  - base_test.yaml
-test_key: "overridden"
