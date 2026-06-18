@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import copy
+import sys
+import traceback
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -233,28 +235,34 @@ def run_baseline_comparison(
     metrics: list[ExperimentMetrics] = []
     for idx, (name, model) in enumerate(models.items(), start=1):
         _log(f"── Baseline [{idx}/{total}] {name} ── (evaluating...)")
-        result = evaluate_policy(
-            name=name,
-            model=model,
-            env_name=env_name,
-            seed=seed,
-            N=N,
-            lam=lam,
-            mu=mu,
-            rollout=rollout,
-            adapter=copy.deepcopy(adapter) if adapter is not None else None,
-            qgym_test_states=qgym_test_states,
-        )
-        flat = result.flat()
-        cost_val = flat.get("avg_cost")
-        vr_val = flat.get("certificate_violation_rate")
-        parts = []
-        if isinstance(cost_val, (int, float)):
-            parts.append(f"cost={cost_val:.4f}")
-        if isinstance(vr_val, (int, float)):
-            parts.append(f"violation_rate={vr_val:.4f}")
-        _log(f"── Baseline [{idx}/{total}] {name} ── {'  '.join(parts)}")
-        metrics.append(result)
+        try:
+            result = evaluate_policy(
+                name=name,
+                model=model,
+                env_name=env_name,
+                seed=seed,
+                N=N,
+                lam=lam,
+                mu=mu,
+                rollout=rollout,
+                adapter=copy.deepcopy(adapter) if adapter is not None else None,
+                qgym_test_states=qgym_test_states,
+            )
+            flat = result.flat()
+            cost_val = flat.get("avg_cost")
+            vr_val = flat.get("certificate_violation_rate")
+            parts = []
+            if isinstance(cost_val, (int, float)):
+                parts.append(f"cost={cost_val:.4f}")
+            if isinstance(vr_val, (int, float)):
+                parts.append(f"violation_rate={vr_val:.4f}")
+            _log(f"── Baseline [{idx}/{total}] {name} ── {'  '.join(parts)}")
+            metrics.append(result)
+        except Exception as exc:
+            _log(f"-- Baseline [{idx}/{total}] {name} -- (FAILED)")
+            print(f"\n[ERROR] Exception in baseline '{name}':", file=sys.stderr)
+            traceback.print_exc()
+            print("\nContinuing to next baseline...", file=sys.stderr)
 
     save_metrics(metrics, output_dir)
     return metrics

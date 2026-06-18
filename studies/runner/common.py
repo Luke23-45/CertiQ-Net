@@ -70,9 +70,17 @@ def _ts() -> str:
 
 def _print(msg: str, *, style: str = "") -> None:
     if _HAS_RICH:
-        _console.print(f"[dim][{_ts()}][/dim] {msg}", markup=True)
+        try:
+            _console.print(f"[dim][{_ts()}][/dim] {msg}", markup=True)
+        except UnicodeEncodeError:
+            safe = msg.encode("ascii", errors="replace").decode("ascii")
+            _console.print(f"[dim][{_ts()}][/dim] {safe}", markup=True)
     else:
-        print(f"[{_ts()}] {msg}")
+        try:
+            print(f"[{_ts()}] {msg}")
+        except UnicodeEncodeError:
+            safe = msg.encode("ascii", errors="replace").decode("ascii")
+            print(f"[{_ts()}] {safe}")
 
 
 def _rule(title: str = "", *, style: str = "bold cyan") -> None:
@@ -82,9 +90,15 @@ def _rule(title: str = "", *, style: str = "bold cyan") -> None:
         width = 72
         if title:
             pad = (width - len(title) - 2) // 2
-            print("═" * pad + f" {title} " + "═" * (width - pad - len(title) - 2))
+            try:
+                print("═" * pad + f" {title} " + "═" * (width - pad - len(title) - 2))
+            except UnicodeEncodeError:
+                print("=" * pad + f" {title} " + "=" * (width - pad - len(title) - 2))
         else:
-            print("═" * width)
+            try:
+                print("═" * width)
+            except UnicodeEncodeError:
+                print("=" * width)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -134,11 +148,11 @@ def run_stage(
         raise
     except BaseException:
         elapsed = time.monotonic() - t0
-        _print(f"[red bold]✗ Stage [{index}/{total}] failed in {_fmt_elapsed(elapsed)}[/red bold]")
+        _print(f"[red bold][X] Stage [{index}/{total}] failed in {_fmt_elapsed(elapsed)}[/red bold]")
         traceback.print_exc()
         raise
     elapsed = time.monotonic() - t0
-    _print(f"[green bold]✓ Stage [{index}/{total}] completed in {_fmt_elapsed(elapsed)}[/green bold]")
+    _print(f"[green bold][V] Stage [{index}/{total}] completed in {_fmt_elapsed(elapsed)}[/green bold]")
 
 
 def _fmt_elapsed(seconds: float) -> str:
@@ -260,5 +274,5 @@ def run_study_family(
     _rule("Run Summary", style="bold green")
     _print(f"Total time: [bold]{_fmt_elapsed(total_elapsed)}[/bold]")
     for seed, status in seed_results:
-        icon = "[green]✓[/green]" if status == "ok" else "[red]✗[/red]"
+        icon = "[green][V][/green]" if status == "ok" else "[red][X][/red]"
         _print(f"  {icon} Seed {seed}: {status}")
