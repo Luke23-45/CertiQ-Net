@@ -23,6 +23,10 @@ _CHECKPOINT_STATE_FILE = ".checkpoint_state.json"
 _LAST_RUN_FILE = ".last_run.json"
 
 
+class CheckpointNotFoundError(Exception):
+    """Raised when no valid checkpoint state is found for the experiment root."""
+
+
 @dataclass(frozen=True)
 class CheckpointState:
     experiment_name: str
@@ -81,24 +85,20 @@ def read_checkpoint_state(paths_root: Path) -> CheckpointState | None:
 def require_checkpoint_state(paths_root: Path) -> Path:
     state = read_checkpoint_state(paths_root)
     if state is None:
-        print(
-            f"[error] No trained checkpoint found.\n"
+        raise CheckpointNotFoundError(
+            f"No trained checkpoint found.\n"
             f"        Expected state file: {paths_root / _CHECKPOINT_STATE_FILE}\n"
             f"        Run training first, or verify the experiment output root\n"
-            f"        and run-id match the trained run.",
-            file=sys.stderr,
+            f"        and run-id match the trained run."
         )
-        sys.exit(1)
 
     ckpt = Path(state.checkpoint_path)
     if not ckpt.exists():
-        print(
-            f"[error] Checkpoint file referenced in state manifest does not exist:\n"
+        raise CheckpointNotFoundError(
+            f"Checkpoint file referenced in state manifest does not exist:\n"
             f"        {ckpt}\n"
-            f"        The file may have been moved or deleted.",
-            file=sys.stderr,
+            f"        The file may have been moved or deleted."
         )
-        sys.exit(1)
 
     return ckpt
 
