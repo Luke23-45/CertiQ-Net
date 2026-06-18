@@ -5,6 +5,9 @@ manifest to the experiment run directory plus an experiment-level
 ``.last_run.json`` that points to the latest trained run.  Downstream
 evaluation functions use ``require_checkpoint_state`` to discover the
 checkpoint path, or exit with a clear error if no trained checkpoint exists.
+
+Paths are stored **relative** to the run root so manifests are portable
+across machines (cloud → local, different mount points, etc.).
 """
 
 from __future__ import annotations
@@ -49,10 +52,11 @@ def save_checkpoint_state(
     seed: int,
     max_epochs: int,
 ) -> Path:
+    relative = checkpoint_path.relative_to(paths_root)
     state = CheckpointState(
         experiment_name=experiment_name,
         run_id=run_id,
-        checkpoint_path=str(checkpoint_path.resolve()),
+        checkpoint_path=str(relative.as_posix()),
         model_target=model_target,
         seed=seed,
         max_epochs=max_epochs,
@@ -82,6 +86,44 @@ def read_checkpoint_state(paths_root: Path) -> CheckpointState | None:
         return None
 
 
+def _resolve_checkpoint(checkpoint_path: str, paths_root: Path) -> Path:
+    """Resolve a checkpoint path with portable fallback logic.
+
+    Resolution order:
+      1. Use the stored path as-is (absolute or relative).
+      2. Resolve relative to *paths_root*.
+      3. Extract the filename and search in standard subdirectories
+         (``artifacts/``, then the run root itself).
+
+    This lets manifests trained on one machine work seamlessly on another.
+    """
+    stored = Path(checkpoint_path)
+
+    # 1 — Try the stored path verbatim
+    if stored.exists():
+        return stored.resolve()
+
+    # 2 — Try resolving relative to the run root
+    if not stored.is_absolute():
+        candidate = (paths_root / stored).resolve()
+        if candidate.exists():
+            return candidate
+
+    # 3 — Fall back: extract filename, search standard locations
+    filename = stored.name
+    for candidate in [
+        paths_root / "artifacts" / filename,
+        paths_root / filename,
+    ]:
+        if candidate.exists():
+            return candidate.resolve()
+
+    raise CheckpointNotFoundError(
+        f"Checkpoint file referenced in state manifest does not exist:\n"
+        f"        {stored}\n"
+    )
+
+
 def require_checkpoint_state(paths_root: Path) -> Path:
     state = read_checkpoint_state(paths_root)
     if state is None:
@@ -92,21 +134,18 @@ def require_checkpoint_state(paths_root: Path) -> Path:
             f"        and run-id match the trained run."
         )
 
-    ckpt = Path(state.checkpoint_path)
-    if not ckpt.exists():
-        raise CheckpointNotFoundError(
-            f"Checkpoint file referenced in state manifest does not exist:\n"
-            f"        {ckpt}\n"
-            f"        The file may have been moved or deleted."
-        )
-
-    return ckpt
+    return _resolve_checkpoint(state.checkpoint_path, paths_root)
 
 
 def load_checkpoint_weights(model: torch.nn.Module, paths_root: Path) -> None:
     ckpt_path = require_checkpoint_state(paths_root)
-    state = torch.load(str(ckpt_path), map_location="cpu", weights_only=True)
-    model.load_state_dict(state)
+    raw = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
+    if isinstance(raw, dict) and "state_dict" in raw:
+        sd = raw["state_dict"]
+        cleaned = {k.removeprefix("model."): v for k, v in sd.items() if k.startswith("model.")}
+        model.load_state_dict(cleaned, strict=False)
+    else:
+        model.load_state_dict(raw, strict=False)
 
 
 # ── Experiment-level "last run" discovery ──────────────────────────────
