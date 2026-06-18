@@ -211,7 +211,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             )
 
         env_node = cfg.get("env")
-        env_target = str(env_node._target_ if env_node is not None else "QueueingCTMC")
+        env_target = str(env_node.get("_target_", "QueueingCTMC") if env_node is not None else "QueueingCTMC")
         if cfg_cert_status == "exact" and "QueueingCTMC" not in env_target:
             raise ValueError(
                 "Constraint Violation: Exact certification requires the QueueingCTMC backend. "
