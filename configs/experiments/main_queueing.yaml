@@ -12,12 +12,14 @@
 defaults:
   - /model: certiq_index
   - /adapter: queueing
+  - /env: synthetic/family_a
   - /trainer: default
   - /logger: csv
   - /progress: default
   - /runner: default
   - /studies/runner: default
   - _self_
+  - /datatype: qgym
 
 project:
   name: certiq-net-main-queueing

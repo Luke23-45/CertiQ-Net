@@ -96,14 +96,14 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         dest="dataset_name",
         default=None,
         help="Dataset type codename (e.g. reentrant_2, reentrant_3_hyper). "
-        "Sets ++datatype=qgym and qgym.data.init_args.dataset_name.",
+        "Sets datatype=qgym and qgym.data.init_args.dataset_name.",
     )
     p.add_argument(
         "--family",
         dest="family_name",
         default=None,
         help="Synthetic env family (e.g. synthetic/family_a, synthetic/family_b). "
-        "Sets ++datatype=synthetic and env=<family>.",
+        "Sets datatype=synthetic and env=<family>.",
     )
     p.add_argument(
         "--dry-run",
@@ -138,7 +138,7 @@ def parse_and_run(
         try:
             ds_reg = DatasetRegistry()
             ds_spec = ds_reg.get(args.dataset_name)
-            hydra_overrides.append("++datatype=qgym")
+            hydra_overrides.append("datatype=qgym")
             hydra_overrides.append(
                 f"qgym.data.init_args.dataset_name={args.dataset_name}"
             )
@@ -152,7 +152,7 @@ def parse_and_run(
 
     elif args.family_name is not None:
         # Synthetic mode: override datatype and env
-        hydra_overrides.append("++datatype=synthetic")
+        hydra_overrides.append("datatype=synthetic")
         hydra_overrides.append(f"env={args.family_name}")
 
     # Translate parsed flags → Hydra overrides
