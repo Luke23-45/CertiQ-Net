@@ -1,0 +1,15 @@
+# @package _global_
+# Cloud/Colab-optimised progress bar.
+#
+# Overrides the TTY-detection so progress bars render even when stdout
+# is piped (e.g. Colab ``!`` shell, CI logs, SLURM output).
+#
+# Use:
+#   python -m studies.runner.families.main_queueing progress=cloud
+progress:
+  force_show: true
+  leave: true
+  dynamic_ncols: false
+  ncols: 80
+  ascii: false
+  mininterval: 0.5

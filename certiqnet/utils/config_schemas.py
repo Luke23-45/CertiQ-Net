@@ -88,6 +88,7 @@ class ProgressConfig:
     bar_format: str | None = None
     ascii: bool = True
     ncols: int | None = None
+    force_show: bool = False
 
 
 @dataclass

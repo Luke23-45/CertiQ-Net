@@ -26,6 +26,7 @@ class ProgressConfig:
     bar_format: str | None = None
     ascii: bool = True
     ncols: int | None = None
+    force_show: bool = False
 
 
 DEFAULT_BAR_FORMAT = "{l_bar}{bar:20}{r_bar}"
@@ -59,7 +60,8 @@ class RobustProgressBar:
         disable: bool = False,
         **kwargs: Any,
     ) -> Iterator[T]:
-        effective_disable = disable or not sys.stdout.isatty()
+        no_tty = not sys.stdout.isatty() and not self.cfg.force_show
+        effective_disable = disable or no_tty
         bar = tqdm(
             iterable,
             total=total,
