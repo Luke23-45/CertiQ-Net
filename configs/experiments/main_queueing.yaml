@@ -3,13 +3,11 @@
 # configs/experiments/main_queueing.yaml
 #
 # Study runner config for the exact-certified queueing family.
-# Used by: studies/runner/families/main_queueing.py
 #
-# This config composes the full training + audit + baselines pipeline.
-# Override any value on the command line:
-#   python -m studies.runner.families.main_queueing \
-#       studies.runner.seeds="[42,43]" \
-#       studies.runner.baselines.include="[sed,max_weight]"
+# datatype is MANDATORY — must be explicitly set to "qgym" or "synthetic".
+# The pipeline reads cfg[datatype] to select data, trainer, loss, and
+# lagrangian parameters.  Both blocks are defined here so that the config
+# is fully self-documenting: no implicit defaults, no hidden inheritance.
 # ──────────────────────────────────────────────────────────────────────────────
 defaults:
   - /model: certiq_index
@@ -19,7 +17,6 @@ defaults:
   - /progress: default
   - /runner: default
   - /studies/runner: default
-  - /datatype: qgym
   - _self_
 
 project:
@@ -34,3 +31,120 @@ project:
 
 experiment_family: main_queueing
 certificate_status: exact
+
+# ── datatype: MANDATORY — no default, must be "qgym" or "synthetic" ─────
+datatype: qgym
+
+# ── Synthetic datatype profile ──────────────────────────────────────────
+# Activated when datatype: synthetic
+synthetic:
+  input_normalization: none
+
+  data:
+    class_path: certiqnet.data.synthetic.datamodule.CertiQNetDataModule
+    init_args:
+      batch_size: 64
+      n_samples: 512
+      max_queue: 15
+      resample_every_epoch: true
+      policy_buffer_max: 4096
+      synthetic_mix_fraction: 0.5
+      teacher_mix_fraction: 0.25
+      policy_mix_fraction: 0.25
+      hard_state_fraction: 0.5
+      adversarial_fraction: 0.25
+
+  trainer:
+    lr: 3.0e-4
+    weight_decay: 1.0e-5
+    rollout_horizon: 64
+    use_ppo: true
+    ppo_epochs: 4
+    ppo_clip_epsilon: 0.2
+    ppo_manual_clip_val: 1.0
+    entropy_warmup_epochs: 20
+    imitation_warmup_epochs: 20
+    critic_bootstrap_epochs: 3
+    imitation_decay_rate: 0.96
+    expert_mode: qmd
+    gamma: 0.99
+    gae_lambda: 0.95
+    val_horizon_max: 8
+
+  loss:
+    omega_bc: 1.0
+    omega_action: 1.5
+    omega_margin: 0.1
+    omega_usage: 0.1
+    rollout_weight: 1.0
+    policy_kl_weight: 0.05
+    value_weight: 1.0
+    entropy_weight: 0.001
+
+  lagrangian:
+    dual_lambda_lr: 0.01
+    dual_lambda_init: 0.0
+    dual_lambda_momentum: 0.9
+    dual_lr_warmup_steps: 10
+    dual_lambda_max: 10.0
+    dual_lr_decay: 1.0
+    target_kl_cert: 0.01
+    initial_policy_kl_weight: 0.05
+
+# ── QGym datatype profile ──────────────────────────────────────────────
+# Activated when datatype: qgym
+qgym:
+  input_normalization: per_sample
+
+  data:
+    class_path: certiqnet.data.qgym.datamodule.QGymDataModule
+    init_args:
+      dataset_name: reentrant_3_hyper
+      auto_collect: true
+      batch_size: 64
+      n_samples: 512
+      max_queue: 15
+      resample_every_epoch: true
+      policy_buffer_max: 4096
+      synthetic_mix_fraction: 0.0
+      teacher_mix_fraction: 0.25
+      policy_mix_fraction: 0.25
+      hard_state_fraction: 0.75
+      adversarial_fraction: 0.25
+
+  trainer:
+    lr: 1.0e-4
+    weight_decay: 1.0e-5
+    rollout_horizon: 64
+    use_ppo: true
+    ppo_epochs: 2
+    ppo_clip_epsilon: 0.15
+    ppo_manual_clip_val: 5.0
+    entropy_warmup_epochs: 20
+    imitation_warmup_epochs: 30
+    critic_bootstrap_epochs: 3
+    imitation_decay_rate: 0.96
+    expert_mode: qmd
+    gamma: 0.99
+    gae_lambda: 0.95
+    val_horizon_max: 8
+
+  loss:
+    omega_bc: 1.0
+    omega_action: 1.5
+    omega_margin: 0.1
+    omega_usage: 0.1
+    rollout_weight: 1.0
+    policy_kl_weight: 0.05
+    value_weight: 1.0
+    entropy_weight: 0.02
+
+  lagrangian:
+    dual_lambda_lr: 0.01
+    dual_lambda_init: 0.0
+    dual_lambda_momentum: 0.9
+    dual_lr_warmup_steps: 10
+    dual_lambda_max: 10.0
+    dual_lr_decay: 1.0
+    target_kl_cert: 0.01
+    initial_policy_kl_weight: 0.05

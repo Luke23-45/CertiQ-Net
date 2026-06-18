@@ -15,8 +15,5 @@ class ChannelLightningModule(BaseCertiQLightningModule):
     """
 
     def _make_observation(self, Q: Tensor, mu: Tensor, xi: Tensor | None) -> tuple[Tensor, Tensor, Tensor | None]:
-        dm = getattr(self.trainer, "datamodule", None)
-        adapter = getattr(dm, "adapter", None) if dm is not None else None
-        if adapter is not None:
-            return adapter.make_observation(Q, mu)
+        Q, mu, xi = super()._make_observation(Q, mu, xi)
         return Q, mu, xi

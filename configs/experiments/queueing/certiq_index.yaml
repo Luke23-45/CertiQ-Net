@@ -10,3 +10,4 @@ defaults:
   - /data: synthetic
 
 seed_everything: 42
+datatype: synthetic

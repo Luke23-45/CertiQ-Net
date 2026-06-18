@@ -226,13 +226,38 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             assumptions_satisfied=assumptions_satisfied,
         )
 
-        dataset_type = str(cfg.trainer.get("dataset_type", "synthetic"))
+        # ── Datatype validation ────────────────────────────────────────
+        datatype = cfg.get("datatype")
+        if datatype not in ("synthetic", "qgym"):
+            raise ValueError(
+                f"datatype must be 'synthetic' or 'qgym', got {datatype}. "
+                "Set 'datatype' in the experiment config (mandatory)."
+            )
+        profile = cfg.get(datatype)
+        if profile is None:
+            raise ValueError(
+                f"Config must include a '{datatype}' block with data, "
+                "trainer, loss, and lagrangian sections."
+            )
 
-        if cfg.datatype == "qgym":
-            spec = DatasetRegistry().get(cfg.data.init_args.dataset_name)
+        # ── Environment parameters ─────────────────────────────────────
+        if datatype == "qgym":
+            data_init_args = dict(profile.data.init_args)
+            dataset_name = data_init_args.get("dataset_name")
+            if dataset_name is None:
+                raise ValueError("QGym profile must include data.init_args.dataset_name")
+            spec = DatasetRegistry().get(dataset_name)
             N = int(spec.env_N)
-            mu = torch.tensor(spec.env_mu_fixed, dtype=torch.float32) if spec.env_mu_fixed is not None else build_mu(cfg)[0]
-            lam = float(spec.env_lam) if spec.env_lam is not None else float(build_mu(cfg)[1])
+            mu = (
+                torch.tensor(spec.env_mu_fixed, dtype=torch.float32)
+                if spec.env_mu_fixed is not None
+                else build_mu(cfg)[0]
+            )
+            lam = (
+                float(spec.env_lam)
+                if spec.env_lam is not None
+                else float(build_mu(cfg)[1])
+            )
         else:
             mu, lam = build_mu(cfg)
             N = int(cfg.env.N)
@@ -246,75 +271,18 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
         num_workers_raw: object = resolved_trainer.get("_num_workers")
         num_workers: int | None = num_workers_raw if isinstance(num_workers_raw, int) else None
 
-        if dataset_type == "synthetic":
-            scfg = cfg.get("data", {})
-            sargs = dict(scfg.get("init_args", {}))
-            dm = CertiQNetDataModule(mu=mu, adapter=adapter, **sargs)
-        elif dataset_type == "qgym":
-            from certiqnet.adapters.qgym.adapter import QGymAdapter
-
-            qcfg = cfg.get("data", {})
-            qargs = dict(qcfg.get("init_args", {}))
-            qgym_mode = qcfg.get("mode", "static")
-
-            # Ensure N is passed (required by QGymDataModule)
-            if "N" not in qargs:
-                qargs["N"] = N
-
-            qgym_adapter_instance: QGymAdapter | None = None
-
-            # Prefer dataset_name (registry) over raw dataset_path
-            has_dataset_name = (
-                "dataset_name" in qargs
-                or qcfg.get("dataset_name") is not None
-            )
-            has_dataset_path = (
-                "dataset_path" in qargs
-                or qcfg.get("dataset_path") is not None
-            )
-
-            if has_dataset_name:
-                # Registry-based: QGymDataModule handles resolution & auto-collect.
-                # No need to pre-build an adapter here.
-                if "dataset_name" not in qargs:
-                    qargs["dataset_name"] = qcfg.dataset_name
-
-            elif qgym_mode == "online":
-                # Legacy online mode: build adapter from inline config
-                policy_weights_raw = qcfg.get("policy_weights")
-                policy_weights = (
-                    dict(policy_weights_raw)
-                    if policy_weights_raw is not None
-                    else None
-                )
-                qgym_adapter_instance = QGymAdapter(
-                    env_config=str(qcfg.env_config),
-                    mode="online",
-                    policy=qcfg.get("policy", "mixed"),
-                    policy_weights=policy_weights,
-                    batch_size_env=qcfg.get("batch_size_env", 1),
-                    seed=seed,
-                    device=str(cfg.get("device", "cpu")),
-                )
-                qargs["qgym_adapter"] = qgym_adapter_instance
-                # Pass holding cost from adapter if available
-                if qgym_adapter_instance.env_h is not None and "h" not in qargs:
-                    qargs["h"] = qgym_adapter_instance.env_h
-
-            else:
-                # Legacy static mode: use raw dataset_path
-                if "dataset_path" not in qargs:
-                    qargs["dataset_path"] = str(qcfg.dataset_path)
-
-            dm = QGymDataModule(mu=mu, **qargs)
-
-            # Use the QGymAdapter for adapter-based logic in the pipeline
-            if adapter is None and qgym_adapter_instance is not None:
-                adapter = qgym_adapter_instance
-                adapter_name = "QGymAdapter"
-                d_xi = int(getattr(adapter, "context_dim", 0))
-        else:
-            raise ValueError(f"Unknown dataset_type: {dataset_type}")
+        # ── DataModule from datatype profile ───────────────────────────
+        data_cfg = profile.data
+        data_init_args = dict(data_cfg.init_args)
+        if datatype == "synthetic":
+            from certiqnet.data.synthetic.datamodule import CertiQNetDataModule
+            data_init_args.setdefault("adapter", adapter)
+            dm = CertiQNetDataModule(N=N, mu=mu, **data_init_args)
+        elif datatype == "qgym":
+            from certiqnet.data.qgym.datamodule import QGymDataModule
+            data_init_args.setdefault("N", N)
+            dm = QGymDataModule(mu=mu, **data_init_args)
+        dm.datatype = datatype
 
         # ── Dataset status logging ─────────────────────────────────────
         ds_name = getattr(dm, "dataset_name", None)
@@ -348,7 +316,10 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             dataset_name=ds_name or "legacy_path",
         )
 
-        loss_cfg = cfg.get("loss", {})
+        # ── Loss from datatype profile ─────────────────────────────────
+        loss_cfg = OmegaConf.to_container(profile.get("loss", {}), resolve=True)
+        if not isinstance(loss_cfg, dict):
+            loss_cfg = {}
         loss_fn = CertiQNetLoss(
             omega_bc=float(loss_cfg.get("omega_bc", 1.0)),
             omega_action=float(loss_cfg.get("omega_action", 1.5)),
@@ -360,35 +331,53 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             entropy_weight=float(loss_cfg.get("entropy_weight", 0.001)),
         )
 
+        # ── Training params from datatype profile ──────────────────────
+        trainer_profile = profile.get("trainer")
+        if trainer_profile is None:
+            raise ValueError(f"'{datatype}' profile must include a 'trainer' section")
+        trainer_container = OmegaConf.to_container(trainer_profile, resolve=True)
+        if not isinstance(trainer_container, dict):
+            raise TypeError(f"'{datatype}'.trainer must resolve to a mapping")
+
+        lagrangian_profile = profile.get("lagrangian")
+        lagrangian_container = OmegaConf.to_container(lagrangian_profile, resolve=True) if lagrangian_profile is not None else {}
+        if not isinstance(lagrangian_container, dict):
+            lagrangian_container = {}
+
+        input_normalization = str(getattr(profile, "input_normalization", "none"))
+
         module_kwargs = dict(
             model=model,
             loss_fn=loss_fn,
-            lr=float(cfg.trainer.lr),
-            weight_decay=float(cfg.trainer.weight_decay),
-            rollout_horizon=int(cfg.trainer.rollout_horizon),
-            use_ppo=bool(getattr(cfg.trainer, "use_ppo", False)),
-            ppo_epochs=int(getattr(cfg.trainer, "ppo_epochs", 4)),
-            ppo_clip_epsilon=float(getattr(cfg.trainer, "ppo_clip_epsilon", 0.2)),
-            ppo_manual_clip_val=float(getattr(cfg.trainer, "ppo_manual_clip_val", 1.0)),
-            entropy_warmup_epochs=int(cfg.trainer.entropy_warmup_epochs),
-            imitation_warmup_epochs=int(cfg.trainer.imitation_warmup_epochs),
-            expert_mode=str(getattr(cfg.trainer, "expert_mode", "sed")),
-            critic_bootstrap_epochs=int(getattr(cfg.trainer, "critic_bootstrap_epochs", 3)),
-            imitation_decay_rate=float(getattr(cfg.trainer, "imitation_decay_rate", 0.96)),
-            target_kl_cert=float(getattr(cfg.trainer, "target_kl_cert", 0.01)),
-            initial_policy_kl_weight=float(getattr(cfg.trainer, "initial_policy_kl_weight", 0.05)),
+            input_normalization=input_normalization,
+            lr=float(trainer_container.get("lr", 3e-4)),
+            weight_decay=float(trainer_container.get("weight_decay", 1e-5)),
+            rollout_horizon=int(trainer_container.get("rollout_horizon", 64)),
+            use_ppo=bool(trainer_container.get("use_ppo", True)),
+            ppo_epochs=int(trainer_container.get("ppo_epochs", 4)),
+            ppo_clip_epsilon=float(trainer_container.get("ppo_clip_epsilon", 0.2)),
+            ppo_manual_clip_val=float(trainer_container.get("ppo_manual_clip_val", 1.0)),
+            entropy_warmup_epochs=int(trainer_container.get("entropy_warmup_epochs", 20)),
+            imitation_warmup_epochs=int(trainer_container.get("imitation_warmup_epochs", 20)),
+            expert_mode=str(trainer_container.get("expert_mode", "sed")),
+            critic_bootstrap_epochs=int(trainer_container.get("critic_bootstrap_epochs", 3)),
+            imitation_decay_rate=float(trainer_container.get("imitation_decay_rate", 0.96)),
+            target_kl_cert=float(lagrangian_container.get("target_kl_cert", 0.01)),
+            initial_policy_kl_weight=float(lagrangian_container.get("initial_policy_kl_weight", 0.05)),
             entropy_weight=float(loss_cfg.get("entropy_weight", 0.001)),
             lam=float(lam),
-            dual_lambda_lr=float(getattr(cfg.trainer, "dual_lambda_lr", 0.01)),
-            dual_lambda_init=float(getattr(cfg.trainer, "dual_lambda_init", 0.0)),
-            dual_lambda_momentum=float(getattr(cfg.trainer, "dual_lambda_momentum", 0.9)),
-            dual_lr_warmup_steps=int(getattr(cfg.trainer, "dual_lr_warmup_steps", 100)),
-            dual_lambda_max=float(getattr(cfg.trainer, "dual_lambda_max", 10.0)),
-            dual_lr_decay=float(getattr(cfg.trainer, "dual_lr_decay", 1.0)),
+            gamma=float(trainer_container.get("gamma", 0.99)),
+            gae_lambda=float(trainer_container.get("gae_lambda", 0.95)),
+            val_horizon_max=int(trainer_container.get("val_horizon_max", 8)),
+            dual_lambda_lr=float(lagrangian_container.get("dual_lambda_lr", 0.01)),
+            dual_lambda_init=float(lagrangian_container.get("dual_lambda_init", 0.0)),
+            dual_lambda_momentum=float(lagrangian_container.get("dual_lambda_momentum", 0.9)),
+            dual_lr_warmup_steps=int(lagrangian_container.get("dual_lr_warmup_steps", 10)),
+            dual_lambda_max=float(lagrangian_container.get("dual_lambda_max", 10.0)),
+            dual_lr_decay=float(lagrangian_container.get("dual_lr_decay", 1.0)),
         )
 
         if adapter_name in ("QueueingAdapter", "QGymAdapter"):
-            # QGym environments are queueing domains — use the same module
             lightning = QueueingLightningModule(**module_kwargs)
         elif adapter_name == "ChannelAdapter":
             lightning = ChannelLightningModule(**module_kwargs)
@@ -588,8 +577,13 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
         adapter = instantiate(cfg.adapter) if "adapter" in cfg else None
         d_xi = int(getattr(adapter, "context_dim", 0))
 
-        if cfg.datatype == "qgym":
-            spec = DatasetRegistry().get(cfg.data.init_args.dataset_name)
+        datatype = str(cfg.get("datatype", "qgym"))
+        profile = cfg.get(datatype) if datatype in ("synthetic", "qgym") else None
+
+        if datatype == "qgym":
+            data_init_args = dict(profile.data.init_args) if profile is not None else {}
+            dataset_name = data_init_args.get("dataset_name", "")
+            spec = DatasetRegistry().get(dataset_name)
             N_audit = int(spec.env_N)
             mu = torch.tensor(spec.env_mu_fixed, dtype=torch.float32) if spec.env_mu_fixed is not None else build_mu(cfg)[0]
             lam = float(spec.env_lam) if spec.env_lam is not None else float(build_mu(cfg)[1])
@@ -625,7 +619,7 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
             _, diag = model(Q_bank, mu_bank, xi_bank, training_mode=False)
 
         violation = (diag.A_final - diag.B_Q).clamp(min=0.0)
-        audit_env_name = str(cfg.data.init_args.dataset_name) if cfg.datatype == "qgym" else str(cfg.env.mu_mode)
+        audit_env_name = str(data_init_args.get("dataset_name", "")) if datatype == "qgym" else str(cfg.env.mu_mode)
         audit_metrics = aggregate_metrics(
             model_name=str(cfg.model._target_).split(".")[-1],
             env_name=audit_env_name,
@@ -706,8 +700,13 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
         adapter = instantiate(cfg.adapter) if "adapter" in cfg else None
         d_xi = int(getattr(adapter, "context_dim", 0))
 
-        if cfg.datatype == "qgym":
-            spec = DatasetRegistry().get(cfg.data.init_args.dataset_name)
+        datatype = str(cfg.get("datatype", "qgym"))
+        profile = cfg.get(datatype) if datatype in ("synthetic", "qgym") else None
+
+        if datatype == "qgym":
+            data_init_args = dict(profile.data.init_args) if profile is not None else {}
+            dataset_name = data_init_args.get("dataset_name", "")
+            spec = DatasetRegistry().get(dataset_name)
             N_bl = int(spec.env_N)
             mu = torch.tensor(spec.env_mu_fixed, dtype=torch.float32) if spec.env_mu_fixed is not None else build_mu(cfg)[0]
             lam = float(spec.env_lam) if spec.env_lam is not None else float(build_mu(cfg)[1])
@@ -747,7 +746,7 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
             exclude=str(baseline_exclude),
         )
 
-        bl_env_name = str(cfg.data.init_args.dataset_name) if cfg.datatype == "qgym" else str(cfg.env.mu_mode)
+        bl_env_name = str(data_init_args.get("dataset_name", "")) if datatype == "qgym" else str(cfg.env.mu_mode)
         metrics = run_baseline_comparison(
             env_name=bl_env_name,
             N=N_bl,

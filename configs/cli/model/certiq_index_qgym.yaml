@@ -1,17 +1,17 @@
 # ──────────────────────────────────────────────────────────────────────────────
-# configs/cli/model/certiq_index.yaml
+# configs/cli/model/certiq_index_qgym.yaml
 #
-# CertiQ-Net full model: CertiQIndexModel + QueueingLightningModule + loss.
+# CertiQ-Net full model — QGym-tuned profile.
 # All architectural and loss hyperparameters are explicit here.
 # ──────────────────────────────────────────────────────────────────────────────
 model:
   class_path: certiqnet.train.queueing.module.QueueingLightningModule
   init_args:
     # ── Input normalization ──────────────────────────────────────────────────
-    input_normalization: none     # synthetic: no normalization needed
+    input_normalization: per_sample  # QGym: normalize per-sample Q values
 
     # ── Optimization ─────────────────────────────────────────────────────────
-    lr: 3.0e-4
+    lr: 1.0e-4
     weight_decay: 1.0e-5
 
     # ── RL ───────────────────────────────────────────────────────────────────
@@ -20,19 +20,19 @@ model:
     gae_lambda: 0.95
     val_horizon_max: 8
 
-    # ── PPO (synthetic-tuned) ────────────────────────────────────────────────
+    # ── PPO (QGym-tuned) ────────────────────────────────────────────────────
     use_ppo: true
-    ppo_epochs: 4
-    ppo_clip_epsilon: 0.2
-    ppo_manual_clip_val: 1.0
+    ppo_epochs: 2
+    ppo_clip_epsilon: 0.15
+    ppo_manual_clip_val: 5.0
 
     # ── Curriculum ───────────────────────────────────────────────────────────
     entropy_warmup_epochs: 20
-    imitation_warmup_epochs: 20
+    imitation_warmup_epochs: 30
     critic_bootstrap_epochs: 3
     imitation_decay_rate: 0.96
     expert_mode: qmd
-    entropy_weight: 0.001
+    entropy_weight: 0.02
 
     # ── Lagrangian dual ───────────────────────────────────────────────────────
     dual_lambda_lr: 0.01
@@ -45,8 +45,8 @@ model:
     initial_policy_kl_weight: 0.05
 
     # ── Environment coupling ─────────────────────────────────────────────────
-    # lam is env-specific; override per experiment (e.g. family_a → 8.0)
-    lam: 1.0
+    # lam is env-specific; override per experiment
+    lam: 0.1286
 
     # ── Neural backbone ──────────────────────────────────────────────────────
     model:
@@ -62,10 +62,10 @@ model:
         num_inducing_points: 4
         dropout: 0.0
         # ── Architecture flags ───────────────────────────────────────────────
-        cost_fn: sed               # "sed" | "qmd" | "learned"
-        constraint_mode: lagrangian  # "lagrangian" | "unconstrained"
-        cost_learner_hidden_dim: 64  # only used when cost_fn = "learned"
-        d_xi: 0                    # context dimension (0 = no context)
+        cost_fn: sed
+        constraint_mode: lagrangian
+        cost_learner_hidden_dim: 64
+        d_xi: 0
 
     # ── Loss ─────────────────────────────────────────────────────────────────
     loss_fn:
@@ -78,4 +78,4 @@ model:
         rollout_weight: 1.0
         policy_kl_weight: 0.05
         value_weight: 1.0
-        entropy_weight: 0.001
+        entropy_weight: 0.02

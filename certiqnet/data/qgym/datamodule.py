@@ -120,6 +120,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         num_workers: int | None = None,
         seed: int = 0,
         max_queue: int = 15,
+        datatype: str = "qgym",
         resample_every_epoch: bool = True,
         policy_buffer_max: int = 4096,
         synthetic_mix_fraction: float = 0.0,
@@ -136,6 +137,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         super().__init__()
         self.N = int(N)
         self.mu = mu.float()
+        self.datatype = str(datatype)
         self.batch_size = int(batch_size)
         self.n_samples = int(n_samples)
         self._num_workers = (

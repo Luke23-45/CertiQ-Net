@@ -11,6 +11,9 @@ __all__ = [
     "LossConfig",
     "ProgressConfig",
     "SweepConfig",
+    "DatatypeTrainerConfig",
+    "DatatypeLagrangianConfig",
+    "DatatypeProfileConfig",
     "RootConfig",
 ]
 
@@ -28,36 +31,57 @@ class EnvConfig:
 
 @dataclass
 class TrainerConfig:
-    dataset_type: str = "synthetic"
+    """Shared PyTorch Lightning Trainer settings — NOT per-datatype."""
     max_epochs: int = 200
     accelerator: str = "auto"
     devices: int = 1
     precision: str = "bf16-mixed"
-    gradient_clip_val: float = 1.0
+    gradient_clip_val: float = 0.0
     val_check_interval: float = 0.25
     log_every_n_steps: int = 10
-    lr: float = 3e-4
-    weight_decay: float = 1e-5
-    rollout_horizon: int = 16
-    pretrain_epochs: int = 20
-    finetune_epochs: int = 40
-    entropy_warmup_epochs: int = 20
-    imitation_warmup_epochs: int = 20
-    policy_buffer_max: int = 4096
-    policy_mix_fraction: float = 0.25
-    teacher_mix_fraction: float = 0.25
-    synthetic_mix_fraction: float = 0.50
-    use_ppo: bool = False
-    ppo_clip_epsilon: float = 0.2
-    ppo_epochs: int = 4
-    ppo_batch_size: int = 64
-    ppo_manual_clip_val: float = 1.0
-    dual_lambda_lr: float = 0.01
-    dual_lambda_init: float = 0.0
-    dual_lambda_momentum: float = 0.9
-    dual_lr_warmup_steps: int = 10
-    dual_lambda_max: float = 10.0
-    dual_lr_decay: float = 1.0
+
+
+@dataclass
+class DatatypeTrainerConfig:
+    """Training hyperparameters that differ per datatype."""
+    lr: float = MISSING
+    weight_decay: float = MISSING
+    rollout_horizon: int = MISSING
+    use_ppo: bool = MISSING
+    ppo_epochs: int = MISSING
+    ppo_clip_epsilon: float = MISSING
+    ppo_manual_clip_val: float = MISSING
+    entropy_warmup_epochs: int = MISSING
+    imitation_warmup_epochs: int = MISSING
+    critic_bootstrap_epochs: int = MISSING
+    imitation_decay_rate: float = MISSING
+    expert_mode: str = MISSING
+    gamma: float = MISSING
+    gae_lambda: float = MISSING
+    val_horizon_max: int = MISSING
+
+
+@dataclass
+class DatatypeLagrangianConfig:
+    """Lagrangian dual-variable hyperparameters that differ per datatype."""
+    dual_lambda_lr: float = MISSING
+    dual_lambda_init: float = MISSING
+    dual_lambda_momentum: float = MISSING
+    dual_lr_warmup_steps: int = MISSING
+    dual_lambda_max: float = MISSING
+    dual_lr_decay: float = MISSING
+    target_kl_cert: float = MISSING
+    initial_policy_kl_weight: float = MISSING
+
+
+@dataclass
+class DatatypeProfileConfig:
+    """Complete per-datatype configuration block."""
+    data: Any = MISSING
+    trainer: DatatypeTrainerConfig = MISSING
+    loss: LossConfig = MISSING
+    lagrangian: DatatypeLagrangianConfig = MISSING
+    input_normalization: str = "none"
 
 
 @dataclass
@@ -108,4 +132,6 @@ class RootConfig:
     progress: ProgressConfig = field(default_factory=ProgressConfig)
     sweep: SweepConfig = field(default_factory=SweepConfig)
     experiment_family: str = "main_queueing"
-    datatype: str = "qgym"
+    datatype: str = MISSING           # MANDATORY: "synthetic" or "qgym" — no default
+    synthetic: DatatypeProfileConfig | None = None
+    qgym: DatatypeProfileConfig | None = None

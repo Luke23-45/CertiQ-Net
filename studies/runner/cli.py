@@ -134,12 +134,13 @@ def parse_and_run(
         sys.exit(1)
 
     if args.dataset_name is not None:
-        # QGym mode: datatype is already "qgym" by default; just set dataset_name
+        # QGym mode: override datatype and the dataset_name in the qgym profile
         try:
             ds_reg = DatasetRegistry()
             ds_spec = ds_reg.get(args.dataset_name)
+            hydra_overrides.append("datatype=qgym")
             hydra_overrides.append(
-                f"data.init_args.dataset_name={args.dataset_name}"
+                f"qgym.data.init_args.dataset_name={args.dataset_name}"
             )
         except KeyError:
             print(

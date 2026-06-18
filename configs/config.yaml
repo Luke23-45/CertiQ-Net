@@ -1,11 +1,10 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # configs/config.yaml  — Hydra root config
 #
-# Change log:
-#   - Removed `loss:` block (authoritative values live in cli/model/certiq_index.yaml)
-#   - Removed `runner:` block (moved to configs/runner/default.yaml)
-#   - Removed `sweep:` block (moved to configs/sweep/default.yaml)
-#   - Kept `project:` and `env:` as primary knobs for every run
+# This is the fallback root config used by train.py in legacy mode.
+# Most real runs use an experiment config (e.g. main_queueing.yaml) which
+# explicitly defines datatype profiles.  This root config is minimal and
+# requires an override (--config) to pick a datatype.
 # ──────────────────────────────────────────────────────────────────────────────
 defaults:
   - model: certiq_index
@@ -14,7 +13,6 @@ defaults:
   - trainer: default
   - logger: csv
   - progress: default
-  - dataset: qgym/default
   - _self_
 
 project:

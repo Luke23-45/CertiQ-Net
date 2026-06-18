@@ -2,13 +2,10 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # configs/dataset/synthetic/default.yaml
 #
-# Synthetic data module preset for Hydra-style training.
-# The duplicate `synthetic:` block that previously mirrored `data:` verbatim
-# has been removed — there is now a single canonical `data:` definition.
+# Legacy synthetic data module preset.
+# Note: dataset_type is no longer read by pipeline.py — datatype profiles
+# in the experiment config are now the single source of truth.
 # ──────────────────────────────────────────────────────────────────────────────
-trainer:
-  dataset_type: synthetic
-
 data:
   class_path: certiqnet.data.synthetic.datamodule.CertiQNetDataModule
   init_args:

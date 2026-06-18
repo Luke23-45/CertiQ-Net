@@ -1,6 +1,2 @@
 # @package _global_
-defaults:
-  - /dataset: qgym/default
-  - _self_
-
 datatype: qgym

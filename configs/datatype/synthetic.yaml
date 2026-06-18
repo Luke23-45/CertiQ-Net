@@ -1,6 +1,2 @@
 # @package _global_
-defaults:
-  - /env: synthetic/family_a
-  - _self_
-
 datatype: synthetic

@@ -159,6 +159,9 @@ class CertiQIndexModel(nn.Module):
             self.exploration_temperature if training_mode else 1.0
         )
         proposal_logits = -learned_logits / effective_tau
+        # Clamp logits to prevent overflow in softmax,
+        # especially when Q values are large (QGym data).
+        proposal_logits = proposal_logits.clamp(min=-20, max=20)
 
         if self.constraint_mode == "projection":
             raise NotImplementedError(
@@ -170,6 +173,10 @@ class CertiQIndexModel(nn.Module):
         # Lagrangian and unconstrained modes both use plain softmax;
         # the difference is only in the training loss.
         pi = torch.softmax(proposal_logits, dim=-1)
+        # Final safety net: replace any NaN/Inf with small uniform noise
+        if torch.isnan(pi).any() or torch.isinf(pi).any():
+            pi = torch.nan_to_num(pi, nan=1e-8, posinf=1e-8, neginf=1e-8)
+            pi = pi / pi.sum(dim=-1, keepdim=True).clamp(min=1e-8)
 
         # Diagnostics (dual variable belongs to the training module)
         a_final = (pi * cost).sum(dim=-1)

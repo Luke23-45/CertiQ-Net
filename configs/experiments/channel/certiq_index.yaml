@@ -11,6 +11,7 @@ defaults:
   - /data: synthetic
 
 seed_everything: 42
+datatype: synthetic
 
 model:
   class_path: certiqnet.train.channel.module.ChannelLightningModule

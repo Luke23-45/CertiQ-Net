@@ -16,13 +16,9 @@ class QueueingLightningModule(BaseCertiQLightningModule):
     """
 
     def _make_observation(self, Q: Tensor, mu: Tensor, xi: Tensor | None) -> tuple[Tensor, Tensor, Tensor | None]:
-        dm = getattr(self.trainer, "datamodule", None)
-        adapter = getattr(dm, "adapter", None) if dm is not None else None
-        if adapter is not None:
-            Q_obs, mu_obs, xi_obs = adapter.make_observation(Q, mu)
-            mu_obs = mu_obs.to(device=Q.device, dtype=Q.dtype) if mu_obs is not None else mu
-            return Q_obs, mu_obs, xi_obs
-        if mu.dim() == 1:
-            mu = mu.unsqueeze(0).expand(Q.shape[0], -1)
+        Q, mu, xi = super()._make_observation(Q, mu, xi)
+        # Move mu to the correct device/dtype after adapter transforms
+        if mu is not None:
+            mu = mu.to(device=Q.device, dtype=Q.dtype)
         return Q, mu, xi
 

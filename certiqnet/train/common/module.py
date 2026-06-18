@@ -48,6 +48,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self,
         model: nn.Module,
         loss_fn: CertiQNetLoss = None,
+        input_normalization: str = "none",
         lr: float = 3e-4,
         weight_decay: float = 1e-5,
         rollout_horizon: int = 16,
@@ -79,6 +80,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         super().__init__()
         self.model = model
         self.loss_fn = loss_fn if loss_fn is not None else CertiQNetLoss()
+        self.input_normalization = str(input_normalization)
         self.lr = lr
         self.weight_decay = weight_decay
         self.rollout_horizon = int(rollout_horizon)
@@ -157,7 +159,14 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         dm = getattr(self.trainer, "datamodule", None)
         adapter = getattr(dm, "adapter", None) if dm is not None else None
         if adapter is not None:
-            return adapter.make_observation(Q, mu)
+            Q, mu, xi = adapter.make_observation(Q, mu)
+        if mu.dim() == 1:
+            mu = mu.unsqueeze(0).expand(Q.shape[0], -1)
+        # Per-sample normalization: divide each row by its own max
+        # (preserves relative ordering, keeps logits bounded)
+        if self.input_normalization == "per_sample":
+            col_max = Q.max(dim=-1, keepdim=True).values.clamp(min=1e-8)
+            Q = Q / col_max
         return Q, mu, xi
 
     # ── Training step ───────────────────────────────────────────────
@@ -244,6 +253,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             advantages[t] = gae
         returns = advantages + old_values_t
         advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
+        advantages = torch.nan_to_num(advantages, nan=0.0, posinf=10.0, neginf=-10.0)
 
         rollout_diag = _stack_mean(policy_diagnostics)
 
@@ -290,7 +300,12 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 flat_mu = mu0.repeat(self.rollout_horizon, 1)
                 flat_xi = xi0.repeat(self.rollout_horizon, 1) if xi0 is not None else None
                 out_eval = self.model.forward_full(flat_Q, flat_mu, flat_xi, training_mode=True)
-                dist_eval = Categorical(probs=out_eval.pi)
+                # Safety net: ensure pi is a valid probability distribution
+                pi_eval = out_eval.pi
+                if torch.isnan(pi_eval).any() or torch.isinf(pi_eval).any():
+                    pi_eval = torch.nan_to_num(pi_eval, nan=0.0, posinf=1e-8, neginf=1e-8)
+                    pi_eval = pi_eval / pi_eval.sum(dim=-1, keepdim=True).clamp(min=1e-8)
+                dist_eval = Categorical(probs=pi_eval)
                 new_log_probs = dist_eval.log_prob(actions_t.reshape(-1))
                 new_values = out_eval.value.reshape(-1)
                 actor_loss = self.loss_fn.ppo_actor_loss(
@@ -337,7 +352,13 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 )
                 self.manual_backward(total_loss)
                 if self._gradient_clip_val > 0:
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self._gradient_clip_val)
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), self._gradient_clip_val
+                    )
+                    if torch.isnan(grad_norm) or torch.isinf(grad_norm):
+                        self.log("grad_nan", 1.0, on_step=True)
+                        opt.zero_grad()
+                        continue
                 opt.step()
 
             self.log("actor", actor_loss, on_step=True, on_epoch=True)

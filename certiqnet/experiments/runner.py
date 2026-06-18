@@ -31,11 +31,20 @@ def experiment_name_from_cfg(cfg: DictConfig) -> str:
     family = str(cfg.get("experiment_family", "default"))
 
     if cfg.datatype == "qgym":
-        ds_name = str(cfg.data.init_args.dataset_name)
-        spec = DatasetRegistry().get(ds_name)
-        n = int(spec.env_N)
-        lam_str = str(spec.env_lam) if spec.env_lam is not None else "auto"
-        return f"{family}_{model_name}_N{n}_{ds_name}_lam{lam_str}"
+        profile = cfg.get("qgym")
+        if profile is not None:
+            ds_name = str(profile.data.init_args.get("dataset_name", "qgym"))
+        else:
+            ds_name = str(cfg.get("qgym_data", "qgym"))
+        ds_name_clean = ds_name.replace("/", "_").replace("\\", "_")
+        spec = DatasetRegistry().get(ds_name_clean) if ds_name_clean != "qgym" else None
+        if spec is not None:
+            n = int(spec.env_N)
+            lam_str = str(spec.env_lam) if spec.env_lam is not None else "auto"
+        else:
+            n = int(cfg.env.N) if "env" in cfg else 6
+            lam_str = "auto"
+        return f"{family}_{model_name}_N{n}_{ds_name_clean}_lam{lam_str}"
     else:
         env_name = str(cfg.env.mu_mode)
         n = int(cfg.env.N)

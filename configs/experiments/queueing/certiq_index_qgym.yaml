@@ -3,12 +3,12 @@
 # configs/experiments/queueing/certiq_index_qgym.yaml
 #
 # CertiQ-Net training backed by pre-collected QGym states (static mode).
-# Inherits the full model from certiq_index and overrides data to QGym.
+# Uses QGym-tuned PPO hyperparameters.
 # ──────────────────────────────────────────────────────────────────────────────
 defaults:
   - /trainer: default
-  - /model: certiq_index
+  - /model: certiq_index_qgym
   - /data: qgym
 
 seed_everything: 42
-
+datatype: qgym

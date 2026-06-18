@@ -2,8 +2,9 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # configs/trainer/fast_dev.yaml
 #
-# Fast development / CI preset.  Overrides only what differs from base.yaml.
+# Fast development / CI preset.
 # Deliberately uses CPU + 32-bit so it runs without a GPU on any machine.
+# Overrides trainer for PL Trainer and datatype profiles for training params.
 # ──────────────────────────────────────────────────────────────────────────────
 defaults:
   - base
@@ -16,13 +17,19 @@ trainer:
   precision: 32-true
 
   # ── Logging / validation ───────────────────────────────────────────────────
-  gradient_clip_val: 1.0        # use standard clipping (not PPO manual)
-  val_check_interval: 1.0       # validate once per epoch only
+  gradient_clip_val: 1.0
+  val_check_interval: 1.0
   log_every_n_steps: 1
 
-  # ── PPO off for speed ──────────────────────────────────────────────────────
-  use_ppo: false
+# Override both datatype profiles for fast dev
+synthetic:
+  trainer:
+    use_ppo: false
+    rollout_horizon: 8
+    val_horizon_max: 4
 
-  # ── Rollout shortened ─────────────────────────────────────────────────────
-  rollout_horizon: 8
-  val_horizon_max: 4
+qgym:
+  trainer:
+    use_ppo: false
+    rollout_horizon: 8
+    val_horizon_max: 4
