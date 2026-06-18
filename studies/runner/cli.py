@@ -23,6 +23,7 @@ import argparse
 import sys
 from typing import Sequence
 
+from certiqnet.data.registry import DatasetRegistry
 from studies.runner.common import StudyRunnerSpec, run_study_family
 
 
@@ -91,6 +92,13 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         help="Disable verbose output.",
     )
     p.add_argument(
+        "--dataset",
+        dest="dataset_name",
+        default=None,
+        help="Dataset type codename (e.g. reentrant_2, reentrant_3_hyper). "
+        "Sets data.init_args.dataset_name and env.N automatically.",
+    )
+    p.add_argument(
         "--dry-run",
         action="store_true",
         dest="dry_run",
@@ -109,6 +117,24 @@ def parse_and_run(
     """
     parser = build_parser()
     args, hydra_overrides = parser.parse_known_args(argv if argv is not None else sys.argv[1:])
+
+    # ── Dataset resolution: translate --dataset codename to Hydra overrides ──
+    if args.dataset_name is not None:
+        try:
+            ds_reg = DatasetRegistry()
+            ds_spec = ds_reg.get(args.dataset_name)
+            hydra_overrides.append(
+                f"data.init_args.dataset_name={args.dataset_name}"
+            )
+            if ds_spec.env_N is not None:
+                hydra_overrides.append(f"env.N={ds_spec.env_N}")
+        except KeyError:
+            print(
+                f"Unknown dataset '{args.dataset_name}'. "
+                f"Available: {', '.join(DatasetRegistry().list_datasets())}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     # Translate parsed flags → Hydra overrides
     if args.stages is not None:

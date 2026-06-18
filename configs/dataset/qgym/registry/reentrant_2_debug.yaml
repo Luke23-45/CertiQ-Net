@@ -2,6 +2,7 @@
 # Debug variant: 10K training states for fast CI / prototyping.
 name: reentrant_2_debug
 env: extern/QGym/configs/env/reentrant_2.yaml
+env_N: 6
 output_dir: final_dataset/qgym
 
 collection:

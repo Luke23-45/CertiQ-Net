@@ -3,6 +3,7 @@
 # training (QGymDataModule via dataset_name).
 name: reentrant_2
 env: extern/QGym/configs/env/reentrant_2.yaml
+env_N: 6
 output_dir: final_dataset/qgym
 
 collection:

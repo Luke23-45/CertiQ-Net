@@ -135,6 +135,7 @@ class DatasetSpec:
 
     name: str
     env: str
+    env_N: int | None = None
     output_dir: str = "final_dataset/qgym"
     collection: CollectionConfig = field(default_factory=CollectionConfig)
     training_defaults: dict = field(default_factory=dict)
@@ -211,9 +212,13 @@ class DatasetRegistry:
             ),
         )
 
+        env_N_raw = raw.get("env_N")
+        env_N = int(env_N_raw) if env_N_raw is not None else None
+
         return DatasetSpec(
             name=str(name),
             env=str(raw.get("env", "")),
+            env_N=env_N,
             output_dir=str(raw.get("output_dir", "final_dataset/qgym")),
             collection=collection,
             training_defaults=raw.get("training_defaults", {}),
@@ -319,6 +324,7 @@ class DatasetRegistry:
         return {
             "name": spec.name,
             "env": spec.env,
+            "env_N": spec.env_N,
             "output_dir": spec.output_dir,
             "collection": dataclasses.asdict(spec.collection),
             "training_defaults": spec.training_defaults,

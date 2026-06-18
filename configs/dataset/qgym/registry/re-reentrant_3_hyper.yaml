@@ -2,6 +2,7 @@
 # Harder topology: double reentrant loops with hyperexponential noise.
 name: re-reentrant_3_hyper
 env: extern/QGym/configs/env/re-reentrant_3_hyper.yaml
+env_N: 9
 output_dir: final_dataset/qgym
 
 collection:
