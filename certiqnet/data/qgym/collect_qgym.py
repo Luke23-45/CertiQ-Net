@@ -92,6 +92,24 @@ def cmd_collect(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     spec = registry.get(name)
+    if args.n_steps is not None:
+        from certiqnet.data.registry import CollectionConfig, DatasetSpec
+
+        spec = DatasetSpec(
+            name=spec.name,
+            env=spec.env,
+            output_dir=spec.output_dir,
+            collection=CollectionConfig(
+                n_steps=args.n_steps,
+                n_valid=spec.collection.n_valid,
+                n_test=spec.collection.n_test,
+                shard_size=spec.collection.shard_size,
+                seed=spec.collection.seed,
+                policy=spec.collection.policy,
+                policy_weights=spec.collection.policy_weights,
+            ),
+            training_defaults=spec.training_defaults,
+        )
     output = manager.collect(spec, force=args.force, skip_verify=args.no_verify)
     print(f"\n[collect] done -> {output}")
 
@@ -201,6 +219,12 @@ def main() -> None:
     p_collect.add_argument("--force", action="store_true", help="Overwrite existing")
     p_collect.add_argument(
         "--no-verify", action="store_true", help="Skip post-collection verification"
+    )
+    p_collect.add_argument(
+        "--n-steps",
+        type=int,
+        default=None,
+        help="Override number of training states from registry default (e.g. --n-steps 10000)",
     )
 
     # ── list ──────────────────────────────────────────────────────────

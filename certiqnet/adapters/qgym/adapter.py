@@ -16,6 +16,7 @@ from typing import Literal
 import numpy as np
 import torch
 from torch import Tensor
+from tqdm import tqdm
 
 from certiqnet.adapters.common.base import AdapterBatch, DispatchAdapter, DispatchTuple
 from certiqnet.adapters.qgym.config import QGymEnvConfig, resolve_env_config_path
@@ -403,6 +404,7 @@ class QGymAdapter(DispatchAdapter):
         mu: Tensor,
         max_queue: int = 100,
         generator: torch.Generator | None = None,
+        show_progress: bool = True,
     ) -> AdapterBatch:
         """Generate a batch of states from the QGym data source.
 
@@ -418,6 +420,9 @@ class QGymAdapter(DispatchAdapter):
             Ignored for QGym — environment determines state distribution.
         generator : torch.Generator | None
             Ignored for ``"static"`` mode (shard order is deterministic).
+        show_progress : bool
+            If ``True`` and mode is ``"online"``, display a tqdm progress bar
+            with ETA during collection.
 
         Returns
         -------
@@ -425,7 +430,7 @@ class QGymAdapter(DispatchAdapter):
         """
         del mu, max_queue
         if self.mode == "online":
-            return self._sample_online(n_samples, N, generator)
+            return self._sample_online(n_samples, N, generator, show_progress=show_progress)
         return self._sample_static(n_samples, N, generator)
 
     def _compute_cost(self, Q: Tensor) -> Tensor:
@@ -440,6 +445,7 @@ class QGymAdapter(DispatchAdapter):
         n_samples: int,
         N: int,
         generator: torch.Generator | None = None,
+        show_progress: bool = True,
     ) -> AdapterBatch:
         """Step the live QGym environment to collect ``n_samples`` states."""
         env = self._env
@@ -464,20 +470,33 @@ class QGymAdapter(DispatchAdapter):
         Q_list: list[Tensor] = []
         cost_list: list[Tensor] = []
 
-        obs, _ = env.reset()
-        obs = obs.flatten() if hasattr(obs, "flatten") else obs
-        collected = 0
-        while collected < n_samples:
-            action = self._collect_policy(obs)
-            obs, reward, done, truncated, info = env.step(action)
+        pbar = tqdm(
+            total=n_samples,
+            unit="state",
+            desc=f"Collecting ({self.policy})",
+            disable=not show_progress,
+            smoothing=0.1,
+            mininterval=0.2,
+            dynamic_ncols=True,
+        )
+        try:
+            obs, _ = env.reset()
             obs = obs.flatten() if hasattr(obs, "flatten") else obs
-            Q_t = torch.tensor(obs, dtype=torch.float)
-            Q_list.append(Q_t)
-            cost_list.append(self._compute_cost(Q_t.unsqueeze(0)).squeeze(0))
-            collected += 1
-            if done or truncated:
-                obs, _ = env.reset()
+            collected = 0
+            while collected < n_samples:
+                action = self._collect_policy(obs)
+                obs, reward, done, truncated, info = env.step(action)
                 obs = obs.flatten() if hasattr(obs, "flatten") else obs
+                Q_t = torch.tensor(obs, dtype=torch.float)
+                Q_list.append(Q_t)
+                cost_list.append(self._compute_cost(Q_t.unsqueeze(0)).squeeze(0))
+                collected += 1
+                pbar.update(1)
+                if done or truncated:
+                    obs, _ = env.reset()
+                    obs = obs.flatten() if hasattr(obs, "flatten") else obs
+        finally:
+            pbar.close()
 
         Q = torch.stack(Q_list)
         cost_t = torch.stack(cost_list)

@@ -28,18 +28,6 @@ from certiqnet.data.registry import DatasetRegistry, DatasetSpec
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-#  Progress / display helpers
-# ---------------------------------------------------------------------------
-
-
-def _progress_bar(current: int, total: int, width: int = 40) -> str:
-    pct = current / max(total, 1)
-    filled = int(width * pct)
-    bar = "█" * filled + "░" * (width - filled)
-    return f"\r  [{bar}] {current:>8,}/{total:,} ({pct:.1%})"
-
-
-# ---------------------------------------------------------------------------
 #  Git helpers
 # ---------------------------------------------------------------------------
 
@@ -163,6 +151,7 @@ class DatasetCollectionManager:
             N=adapter.N,
             mu=torch.ones(adapter.N),
             generator=gen,
+            show_progress=True,
         )
 
         elapsed = time.perf_counter() - t0
