@@ -3,6 +3,7 @@
 name: reentrant_3_hyper_debug
 env: extern/QGym/configs/env/reentrant_3_hyper.yaml
 env_N: 9
+env_lam: 0.128578
 output_dir: final_dataset/qgym
 
 collection:

@@ -210,7 +210,8 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
                 f"'certificate_status=approximate'."
             )
 
-        env_target = str(cfg.get("env", {}).get("_target_", "QueueingCTMC"))
+        env_node = cfg.get("env")
+        env_target = str(env_node._target_ if env_node is not None else "QueueingCTMC")
         if cfg_cert_status == "exact" and "QueueingCTMC" not in env_target:
             raise ValueError(
                 "Constraint Violation: Exact certification requires the QueueingCTMC backend. "
@@ -225,15 +226,23 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             assumptions_satisfied=assumptions_satisfied,
         )
 
-        mu, _ = build_mu(cfg)
-        model = build_model(cfg, N=int(cfg.env.N), d_xi=d_xi)
+        dataset_type = str(cfg.trainer.get("dataset_type", "synthetic"))
+
+        if cfg.datatype == "qgym":
+            spec = DatasetRegistry().get(cfg.data.init_args.dataset_name)
+            N = int(spec.env_N)
+            mu = torch.tensor(spec.env_mu_fixed, dtype=torch.float32) if spec.env_mu_fixed is not None else build_mu(cfg)[0]
+            lam = float(spec.env_lam) if spec.env_lam is not None else float(build_mu(cfg)[1])
+        else:
+            mu, lam = build_mu(cfg)
+            N = int(cfg.env.N)
+        model = build_model(cfg, N=N, d_xi=d_xi)
+
         if str(cfg.get("certificate_status", "exact")) == "exact":
             model_constant = _validate_exact_certificate_constant(model, context="training runs")
             _set_model_certificate_constant(cfg, model_constant)
             OmegaConf.save(config=cfg, f=paths.configs / "resolved_config.yaml", resolve=True)
         torch.save(model.state_dict(), paths.artifacts / "initial_model_state.pt")
-
-        dataset_type = str(cfg.trainer.get("dataset_type", "synthetic"))
         num_workers_raw: object = resolved_trainer.get("_num_workers")
         num_workers: int | None = num_workers_raw if isinstance(num_workers_raw, int) else None
 
@@ -250,7 +259,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
 
             # Ensure N is passed (required by QGymDataModule)
             if "N" not in qargs:
-                qargs["N"] = int(cfg.env.N)
+                qargs["N"] = N
 
             qgym_adapter_instance: QGymAdapter | None = None
 
@@ -369,7 +378,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             target_kl_cert=float(getattr(cfg.trainer, "target_kl_cert", 0.01)),
             initial_policy_kl_weight=float(getattr(cfg.trainer, "initial_policy_kl_weight", 0.05)),
             entropy_weight=float(loss_cfg.get("entropy_weight", 0.001)),
-            lam=float(cfg.env.lam),
+            lam=float(lam),
             dual_lambda_lr=float(getattr(cfg.trainer, "dual_lambda_lr", 0.01)),
             dual_lambda_init=float(getattr(cfg.trainer, "dual_lambda_init", 0.0)),
             dual_lambda_momentum=float(getattr(cfg.trainer, "dual_lambda_momentum", 0.9)),
@@ -578,8 +587,16 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
 
         adapter = instantiate(cfg.adapter) if "adapter" in cfg else None
         d_xi = int(getattr(adapter, "context_dim", 0))
-        mu, lam = build_mu(cfg)
-        model = build_model(cfg, N=int(cfg.env.N), d_xi=d_xi)
+
+        if cfg.datatype == "qgym":
+            spec = DatasetRegistry().get(cfg.data.init_args.dataset_name)
+            N_audit = int(spec.env_N)
+            mu = torch.tensor(spec.env_mu_fixed, dtype=torch.float32) if spec.env_mu_fixed is not None else build_mu(cfg)[0]
+            lam = float(spec.env_lam) if spec.env_lam is not None else float(build_mu(cfg)[1])
+        else:
+            mu, lam = build_mu(cfg)
+            N_audit = int(cfg.env.N)
+        model = build_model(cfg, N=N_audit, d_xi=d_xi)
         if str(cfg.get("certificate_status", "exact")) == "exact":
             _validate_exact_certificate_constant(model, context="audits")
         load_checkpoint_weights(model, paths.root)
@@ -587,7 +604,7 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
 
         run_logger.info("generating_state_bank")
         Q_bank = generate_state_bank(
-            N=int(cfg.env.N),
+            N=N_audit,
             mu=mu,
             beta=float(getattr(model, "beta", 1.0)),
             R_cert=float(cfg.model.get("certificate", {}).get("fallback_radius", float("inf"))),
@@ -608,9 +625,10 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
             _, diag = model(Q_bank, mu_bank, xi_bank, training_mode=False)
 
         violation = (diag.A_final - diag.B_Q).clamp(min=0.0)
+        audit_env_name = str(cfg.data.init_args.dataset_name) if cfg.datatype == "qgym" else str(cfg.env.mu_mode)
         audit_metrics = aggregate_metrics(
             model_name=str(cfg.model._target_).split(".")[-1],
-            env_name=str(cfg.env.mu_mode),
+            env_name=audit_env_name,
             seed=int(cfg.project.seed),
             lam=lam,
             queue_trace=Q_bank,
@@ -687,8 +705,16 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
 
         adapter = instantiate(cfg.adapter) if "adapter" in cfg else None
         d_xi = int(getattr(adapter, "context_dim", 0))
-        mu, lam = build_mu(cfg)
-        model = build_model(cfg, N=int(cfg.env.N), d_xi=d_xi)
+
+        if cfg.datatype == "qgym":
+            spec = DatasetRegistry().get(cfg.data.init_args.dataset_name)
+            N_bl = int(spec.env_N)
+            mu = torch.tensor(spec.env_mu_fixed, dtype=torch.float32) if spec.env_mu_fixed is not None else build_mu(cfg)[0]
+            lam = float(spec.env_lam) if spec.env_lam is not None else float(build_mu(cfg)[1])
+        else:
+            mu, lam = build_mu(cfg)
+            N_bl = int(cfg.env.N)
+        model = build_model(cfg, N=N_bl, d_xi=d_xi)
         if str(cfg.get("certificate_status", "exact")) == "exact":
             _validate_exact_certificate_constant(model, context="baseline comparisons")
         load_checkpoint_weights(model, paths.root)
@@ -721,9 +747,10 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
             exclude=str(baseline_exclude),
         )
 
+        bl_env_name = str(cfg.data.init_args.dataset_name) if cfg.datatype == "qgym" else str(cfg.env.mu_mode)
         metrics = run_baseline_comparison(
-            env_name=str(cfg.env.mu_mode),
-            N=int(cfg.env.N),
+            env_name=bl_env_name,
+            N=N_bl,
             lam=lam,
             mu=mu,
             seed=int(cfg.project.seed),

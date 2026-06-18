@@ -13,14 +13,13 @@
 # ──────────────────────────────────────────────────────────────────────────────
 defaults:
   - /model: certiq_index
-  - /env: family_a
   - /adapter: queueing
   - /trainer: default
   - /logger: csv
   - /progress: default
   - /runner: default
-  - /dataset: qgym/default
   - /studies/runner: default
+  - /datatype: qgym
   - _self_
 
 project:

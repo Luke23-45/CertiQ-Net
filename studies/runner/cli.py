@@ -96,7 +96,14 @@ def build_parser(prog: str | None = None) -> argparse.ArgumentParser:
         dest="dataset_name",
         default=None,
         help="Dataset type codename (e.g. reentrant_2, reentrant_3_hyper). "
-        "Sets data.init_args.dataset_name and env.N automatically.",
+        "Sets datatype=qgym and data.init_args.dataset_name.",
+    )
+    p.add_argument(
+        "--family",
+        dest="family_name",
+        default=None,
+        help="Synthetic env family (e.g. synthetic/family_a, synthetic/family_b). "
+        "Sets datatype=synthetic and env=<family>.",
     )
     p.add_argument(
         "--dry-run",
@@ -118,16 +125,22 @@ def parse_and_run(
     parser = build_parser()
     args, hydra_overrides = parser.parse_known_args(argv if argv is not None else sys.argv[1:])
 
-    # ── Dataset resolution: translate --dataset codename to Hydra overrides ──
+    # ── Mode resolution ───────────────────────────────────────────────────────
+    if args.dataset_name is not None and args.family_name is not None:
+        print(
+            "Cannot specify both --dataset and --family. Choose one mode.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     if args.dataset_name is not None:
+        # QGym mode: datatype is already "qgym" by default; just set dataset_name
         try:
             ds_reg = DatasetRegistry()
             ds_spec = ds_reg.get(args.dataset_name)
             hydra_overrides.append(
                 f"data.init_args.dataset_name={args.dataset_name}"
             )
-            if ds_spec.env_N is not None:
-                hydra_overrides.append(f"env.N={ds_spec.env_N}")
         except KeyError:
             print(
                 f"Unknown dataset '{args.dataset_name}'. "
@@ -135,6 +148,11 @@ def parse_and_run(
                 file=sys.stderr,
             )
             sys.exit(1)
+
+    elif args.family_name is not None:
+        # Synthetic mode: override datatype and env
+        hydra_overrides.append("datatype=synthetic")
+        hydra_overrides.append(f"env={args.family_name}")
 
     # Translate parsed flags → Hydra overrides
     if args.stages is not None:

@@ -8,4 +8,4 @@
 sweep:
   seeds: [0, 1, 2]                              # random seeds to sweep over
   models: [certiq_index]                         # model configs to sweep
-  envs: [family_a, family_b, family_c, family_e] # env configs to sweep
+  envs: [synthetic/family_a, synthetic/family_b, synthetic/family_c, synthetic/family_e] # env configs to sweep

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from omegaconf import DictConfig
 
+from certiqnet.data.registry import DatasetRegistry
 from certiqnet.experiments.logging import BufferedExperimentLogger as ExperimentLogger
 from certiqnet.experiments.paths import (
     RunPaths,
@@ -27,12 +28,20 @@ def _optional_text(value: object) -> str:
 def experiment_name_from_cfg(cfg: DictConfig) -> str:
     """Build deterministic experiment name from composed Hydra config."""
     model_name = str(cfg.model._target_).split(".")[-1]
-    env_name = str(cfg.env.mu_mode)
-    n = int(cfg.env.N)
-    rho = cfg.env.get("rho_target")
-    rho_part = f"rho{rho}" if rho is not None else f"lam{cfg.env.lam}"
     family = str(cfg.get("experiment_family", "default"))
-    return f"{family}_{model_name}_N{n}_{env_name}_{rho_part}"
+
+    if cfg.datatype == "qgym":
+        ds_name = str(cfg.data.init_args.dataset_name)
+        spec = DatasetRegistry().get(ds_name)
+        n = int(spec.env_N)
+        lam_str = str(spec.env_lam) if spec.env_lam is not None else "auto"
+        return f"{family}_{model_name}_N{n}_{ds_name}_lam{lam_str}"
+    else:
+        env_name = str(cfg.env.mu_mode)
+        n = int(cfg.env.N)
+        rho = cfg.env.get("rho_target")
+        rho_part = f"rho{rho}" if rho is not None else f"lam{cfg.env.lam}"
+        return f"{family}_{model_name}_N{n}_{env_name}_{rho_part}"
 
 
 def prepare_run(

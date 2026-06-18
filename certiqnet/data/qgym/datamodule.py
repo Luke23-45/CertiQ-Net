@@ -403,6 +403,11 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             self._qgym_train_ds = QGymDataset(
                 str(self.dataset_path), split="train"
             )
+            # Use the dataset's own mu and N so they match the shard data,
+            # regardless of what the experiment env config specifies.
+            if self._qgym_train_ds.mu is not None:
+                self.mu = self._qgym_train_ds.mu
+            self.N = self._qgym_train_ds.N
 
     def _setup_test(self) -> None:
         """Build the test dataset from the ``test`` split when available."""

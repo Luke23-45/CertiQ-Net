@@ -94,16 +94,17 @@ class ProgressConfig:
 class SweepConfig:
     seeds: tuple[int, ...] = (0, 1, 2)
     models: tuple[str, ...] = ("certiq_index",)
-    envs: tuple[str, ...] = ("family_a", "family_b", "family_c", "family_e")
+    envs: tuple[str, ...] = ("synthetic/family_a", "synthetic/family_b", "synthetic/family_c", "synthetic/family_e")
 
 
 @dataclass
 class RootConfig:
     project: dict[str, Any] = MISSING
     model: Any = MISSING
-    env: EnvConfig = MISSING
+    env: EnvConfig | None = None
     trainer: TrainerConfig = field(default_factory=TrainerConfig)
     loss: LossConfig = field(default_factory=LossConfig)
     progress: ProgressConfig = field(default_factory=ProgressConfig)
     sweep: SweepConfig = field(default_factory=SweepConfig)
     experiment_family: str = "main_queueing"
+    datatype: str = "qgym"
