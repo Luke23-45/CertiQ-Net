@@ -1,6 +1,5 @@
 """Pure analytic backbone baseline (CertifiedGeometry wrapper)."""
 
-import torch
 import torch.nn as nn
 from torch import Tensor
 

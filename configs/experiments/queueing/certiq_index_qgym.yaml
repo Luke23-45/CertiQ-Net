@@ -1,10 +1,10 @@
 # @package _global_
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 # configs/experiments/queueing/certiq_index_qgym.yaml
 #
 # CertiQ-Net training backed by pre-collected QGym states (static mode).
 # Uses QGym-tuned PPO hyperparameters.
-# ──────────────────────────────────────────────────────────────────────────────
+# ------------------------------------------------------------------------------
 defaults:
   - /trainer: default
   - /model: certiq_index_qgym

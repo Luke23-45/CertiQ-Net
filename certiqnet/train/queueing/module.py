@@ -12,7 +12,7 @@ class QueueingLightningModule(BaseCertiQLightningModule):
 
     This is the primary domain — uses ``QueueingAdapter``-style
     observation transforms (default: identity) and is compatible with
-    both ``CertiQNetDataModule`` (synthetic) and ``QGymDataModule``.
+    ``QGymDataModule``.
     """
 
     def _make_observation(self, Q: Tensor, mu: Tensor, xi: Tensor | None) -> tuple[Tensor, Tensor, Tensor | None]:

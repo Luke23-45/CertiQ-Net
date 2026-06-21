@@ -6,7 +6,7 @@ New (LightningCLI):
     python certiqnet/scripts/train.py --cli --config configs/experiments/queueing/certiq_index.yaml
 
 Legacy (Hydra):
-    python certiqnet/scripts/train.py model=certiq_index env=synthetic/family_a adapter=queueing trainer=default
+    python certiqnet/scripts/train.py model=certiq_index adapter=queueing trainer=default
 """
 
 from __future__ import annotations

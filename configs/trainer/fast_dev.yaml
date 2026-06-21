@@ -21,13 +21,7 @@ trainer:
   val_check_interval: 1.0
   log_every_n_steps: 1
 
-# Override both datatype profiles for fast dev
-synthetic:
-  trainer:
-    use_ppo: false
-    rollout_horizon: 8
-    val_horizon_max: 4
-
+# Override the QGym datatype profile for fast dev
 qgym:
   trainer:
     use_ppo: false

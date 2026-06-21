@@ -8,7 +8,6 @@
 # ──────────────────────────────────────────────────────────────────────────────
 defaults:
   - model: certiq_index
-  - env: synthetic/family_a
   - adapter: queueing
   - trainer: default
   - logger: csv

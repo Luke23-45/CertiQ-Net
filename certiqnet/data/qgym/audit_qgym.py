@@ -31,7 +31,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from certiqnet.adapters.qgym.config import QGymEnvConfig, resolve_env_config_path
-from certiqnet.data.qgym.dataset import QGymDataset
 from certiqnet.data.registry import DatasetRegistry
 
 # ---------------------------------------------------------------------------

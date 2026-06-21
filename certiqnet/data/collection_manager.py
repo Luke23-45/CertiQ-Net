@@ -6,23 +6,19 @@ Delegated to by both ``collect_qgym.py`` (standalone CLI) and
 
 from __future__ import annotations
 
-import dataclasses
 import logging
 import math
 import shutil
 import subprocess
-import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import numpy as np
 import torch
 import yaml
 
 from certiqnet.adapters.qgym.adapter import QGymAdapter
-from certiqnet.adapters.qgym.config import QGymEnvConfig, resolve_env_config_path
-from certiqnet.adapters.qgym.env_loader import compute_effective_mu
+from certiqnet.adapters.qgym.config import resolve_env_config_path
 from certiqnet.data.registry import DatasetRegistry, DatasetSpec
 
 log = logging.getLogger(__name__)

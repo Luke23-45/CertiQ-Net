@@ -1,7 +1,0 @@
-# @package _global_
-# ──────────────────────────────────────────────────────────────────────────────
-# configs/experiments/queueing/sed_baseline.yaml
-# ──────────────────────────────────────────────────────────────────────────────
-defaults:
-  - baseline
-  - /model: sed_baseline

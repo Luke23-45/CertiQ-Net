@@ -26,8 +26,6 @@ layers:
 * **Hard / adversarial states** — high-backlog states from the
   state-bank generator, ensuring coverage of rarely-visited but
   safety-critical regions.
-* *(optional)* **Synthetic padding** — a small fraction of i.i.d.
-  uniform-random states for regularisation.
 """
 
 from __future__ import annotations
@@ -50,7 +48,7 @@ from certiqnet.adapters.qgym.env_loader import compute_queue_holding_cost
 from certiqnet.data.collection_manager import DatasetCollectionManager
 from certiqnet.data.qgym.dataset import QGymDataset
 from certiqnet.data.registry import DatasetRegistry
-from certiqnet.data.synthetic.state_bank import generate_state_bank
+from certiqnet.data.common.state_bank import generate_state_bank
 from certiqnet.train.common.supervision import heuristic_actions
 from certiqnet.utils.platform import resolve_num_workers
 
@@ -83,8 +81,6 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         Rebuild the training dataset at the start of each epoch.
     policy_buffer_max : int
         Maximum number of policy-visited states in the replay buffer.
-    synthetic_mix_fraction : float
-        Fraction of i.i.d. uniform synthetic states (default 0.0).
     teacher_mix_fraction : float
         Fraction of states drawn from the teacher replay buffer.
     policy_mix_fraction : float
@@ -123,7 +119,6 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         datatype: str = "qgym",
         resample_every_epoch: bool = True,
         policy_buffer_max: int = 4096,
-        synthetic_mix_fraction: float = 0.0,
         teacher_mix_fraction: float = 0.25,
         policy_mix_fraction: float = 0.25,
         hard_state_fraction: float = 0.5,
@@ -153,21 +148,15 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         self.qgym_adapter = qgym_adapter
 
         # ── Validate and store mix fractions ──────────────────────────
-        self.synthetic_mix_fraction = float(synthetic_mix_fraction)
         self.teacher_mix_fraction = float(teacher_mix_fraction)
         self.policy_mix_fraction = float(policy_mix_fraction)
         self.hard_state_fraction = float(hard_state_fraction)
         self.adversarial_fraction = float(adversarial_fraction)
 
-        frac_sum = (
-            self.synthetic_mix_fraction
-            + self.teacher_mix_fraction
-            + self.policy_mix_fraction
-        )
+        frac_sum = self.teacher_mix_fraction + self.policy_mix_fraction
         if frac_sum > _MAX_MIX_SUM:
             raise ValueError(
-                f"Mix fractions (synthetic={self.synthetic_mix_fraction}, "
-                f"teacher={self.teacher_mix_fraction}, "
+                f"Mix fractions (teacher={self.teacher_mix_fraction}, "
                 f"policy={self.policy_mix_fraction}) sum to {frac_sum:.3f}, "
                 "which exceeds 1.0.  Reduce one or more fractions."
             )
@@ -211,10 +200,8 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         """Expose the QGym adapter as ``dm.adapter`` for training-module compatibility.
 
         Training modules (``QueueingLightningModule`` et al.) access
-        ``dm.adapter.make_observation(Q, mu)`` during rollouts.  This
-        property ensures QGymDataModule works as a drop-in replacement
-        for ``CertiQNetDataModule`` which stores the adapter as
-        ``self.adapter``.
+        ``dm.adapter.make_observation(Q, mu)`` during rollouts.  The
+        adapter is stored as ``self.qgym_adapter``.
         """
         return self.qgym_adapter
 
@@ -317,11 +304,6 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             # Only apply defaults if the user did not explicitly set these
             # attributes.  Explicit __init__ args always win.  The magic
             # numbers below match the constructor default values.
-            if (
-                self.synthetic_mix_fraction == 0.0
-                and "synthetic_mix_fraction" in defaults
-            ):
-                self.synthetic_mix_fraction = float(defaults["synthetic_mix_fraction"])
             if (
                 self.teacher_mix_fraction == 0.25
                 and "teacher_mix_fraction" in defaults
@@ -473,11 +455,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
 
         # ── Compute counts ────────────────────────────────────────────
         qgym_fraction = max(
-            0.0,
-            1.0
-            - self.synthetic_mix_fraction
-            - self.teacher_mix_fraction
-            - self.policy_mix_fraction,
+            0.0, 1.0 - self.teacher_mix_fraction - self.policy_mix_fraction,
         )
         qgym_count = max(1, int(self.n_samples * qgym_fraction))
         hard_count = int(qgym_count * self.hard_state_fraction)
@@ -485,9 +463,6 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
 
         teacher_count = max(0, int(self.n_samples * self.teacher_mix_fraction))
         policy_count = max(0, int(self.n_samples * self.policy_mix_fraction))
-        synthetic_count = max(
-            0, int(self.n_samples * self.synthetic_mix_fraction)
-        )
         adversarial_count = max(1, int(self.n_samples * self.adversarial_fraction))
 
         # ── QGym source ──────────────────────────────────────────────
@@ -518,16 +493,6 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         else:
             qgym_q = torch.empty(0, self.N)
             qgym_mu = torch.empty(0, self.N)
-
-        # ── Synthetic padding ────────────────────────────────────────
-        if synthetic_count > 0:
-            synthetic_q = torch.randint(
-                0, max(1, self.max_queue), (synthetic_count, self.N), generator=gen
-            ).float()
-            synthetic_mu = self.mu.unsqueeze(0).expand(synthetic_count, -1)
-        else:
-            synthetic_q = torch.empty(0, self.N)
-            synthetic_mu = torch.empty(0, self.N)
 
         # ── Replay buffers ───────────────────────────────────────────
         teacher_states = self._sample_rows(
@@ -565,7 +530,6 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         Q = torch.cat(
             [
                 qgym_q,
-                synthetic_q,
                 hard_states.float(),
                 teacher_states.float(),
                 policy_states.float(),
@@ -576,7 +540,6 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         mu = torch.cat(
             [
                 qgym_mu,
-                synthetic_mu,
                 self.mu.unsqueeze(0).expand(hard_states.shape[0], -1),
                 self.mu.unsqueeze(0).expand(teacher_states.shape[0], -1),
                 self.mu.unsqueeze(0).expand(policy_states.shape[0], -1),
@@ -733,8 +696,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         return (
             f"QGymDataModule(N={self.N}, mode='{mode}', "
             f"n_samples={self.n_samples}, batch_size={self.batch_size}, "
-            f"mix=[qgym={1 - self.synthetic_mix_fraction - self.teacher_mix_fraction - self.policy_mix_fraction:.2f}, "
-            f"synth={self.synthetic_mix_fraction:.2f}, "
+            f"mix=[qgym={1 - self.teacher_mix_fraction - self.policy_mix_fraction:.2f}, "
             f"teacher={self.teacher_mix_fraction:.2f}, "
             f"policy={self.policy_mix_fraction:.2f}], "
             f"h={'yes' if self._h is not None else 'no'})"

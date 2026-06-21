@@ -119,7 +119,7 @@ class ProgressConfig:
 class SweepConfig:
     seeds: tuple[int, ...] = (0, 1, 2)
     models: tuple[str, ...] = ("certiq_index",)
-    envs: tuple[str, ...] = ("synthetic/family_a", "synthetic/family_b", "synthetic/family_c", "synthetic/family_e")
+    envs: tuple[str, ...] = ()
 
 
 @dataclass
@@ -132,6 +132,5 @@ class RootConfig:
     progress: ProgressConfig = field(default_factory=ProgressConfig)
     sweep: SweepConfig = field(default_factory=SweepConfig)
     experiment_family: str = "main_queueing"
-    datatype: str = MISSING           # MANDATORY: "synthetic" or "qgym" — no default
-    synthetic: DatatypeProfileConfig | None = None
+    datatype: str = MISSING           # MANDATORY: must be "qgym"
     qgym: DatatypeProfileConfig | None = None

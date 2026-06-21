@@ -29,7 +29,6 @@ The primary workflow uses the **centralized dataset registry**
 from __future__ import annotations
 
 import argparse
-import json as json_mod
 import sys
 from pathlib import Path
 

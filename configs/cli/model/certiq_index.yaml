@@ -8,7 +8,7 @@ model:
   class_path: certiqnet.train.queueing.module.QueueingLightningModule
   init_args:
     # ── Input normalization ──────────────────────────────────────────────────
-    input_normalization: none     # synthetic: no normalization needed
+    input_normalization: none
 
     # ── Optimization ─────────────────────────────────────────────────────────
     lr: 3.0e-4
@@ -20,7 +20,7 @@ model:
     gae_lambda: 0.95
     val_horizon_max: 8
 
-    # ── PPO (synthetic-tuned) ────────────────────────────────────────────────
+    # ── PPO ──────────────────────────────────────────────────────────────────
     use_ppo: true
     ppo_epochs: 4
     ppo_clip_epsilon: 0.2

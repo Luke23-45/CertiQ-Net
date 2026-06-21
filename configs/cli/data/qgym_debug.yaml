@@ -17,6 +17,5 @@ data:
     teacher_mix_fraction: 0.25
     policy_mix_fraction: 0.25
     hard_state_fraction: 0.5
-    synthetic_mix_fraction: 0.0
     dataset_name: reentrant_2_debug # centralized registry name
     auto_collect: true             # auto-collect if missing

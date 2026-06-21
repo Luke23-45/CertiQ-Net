@@ -1,7 +1,0 @@
-# @package _global_
-# ──────────────────────────────────────────────────────────────────────────────
-# configs/experiments/queueing/backbone_only_baseline.yaml
-# ──────────────────────────────────────────────────────────────────────────────
-defaults:
-  - baseline
-  - /model: backbone_only

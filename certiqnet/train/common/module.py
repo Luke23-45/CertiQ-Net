@@ -449,7 +449,6 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             self.model.reset_dispatch_state()
         env = CTMCEnvironment(N=int(Q.shape[-1]), lam=self.lam, mu=mu[0], B=Q.shape[0])
         env.reset(Q.detach().clone())
-        dm = getattr(self.trainer, "datamodule", None)
         policy_diagnostics: list[DispatcherDiagnostics] = []
         queue_trace: list[Tensor] = []
         cost_trace: list[Tensor] = []

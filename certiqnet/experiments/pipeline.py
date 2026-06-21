@@ -15,11 +15,10 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
-from certiqnet.data.synthetic.state_bank import generate_state_bank
+from certiqnet.data.common.state_bank import generate_state_bank
 from certiqnet.experiments.baseline_runner import RolloutConfig, run_baseline_comparison
 from certiqnet.experiments.checkpoint_state import (
     load_checkpoint_weights,
-    read_checkpoint_state,
     read_last_run,
     save_checkpoint_state,
     save_last_run,
@@ -31,7 +30,6 @@ from certiqnet.experiments.paths import RunPaths, slugify
 from certiqnet.experiments.runner import experiment_name_from_cfg, prepare_run
 from certiqnet.data.qgym.datamodule import QGymDataModule
 from certiqnet.data.registry import DatasetRegistry
-from certiqnet.data.synthetic.datamodule import CertiQNetDataModule
 from certiqnet.train.common.loss import CertiQNetLoss
 from certiqnet.train.queueing.module import QueueingLightningModule
 from certiqnet.train.channel.module import ChannelLightningModule
@@ -228,10 +226,10 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
 
         # ── Datatype validation ────────────────────────────────────────
         datatype = cfg.get("datatype")
-        if datatype not in ("synthetic", "qgym"):
+        if datatype != "qgym":
             raise ValueError(
-                f"datatype must be 'synthetic' or 'qgym', got {datatype}. "
-                "Set 'datatype' in the experiment config (mandatory)."
+                f"datatype must be 'qgym', got {datatype}. "
+                "Set 'datatype=qgym' in the experiment config (mandatory)."
             )
         profile = cfg.get(datatype)
         if profile is None:
@@ -241,26 +239,22 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             )
 
         # ── Environment parameters ─────────────────────────────────────
-        if datatype == "qgym":
-            data_init_args = dict(profile.data.init_args)
-            dataset_name = data_init_args.get("dataset_name")
-            if dataset_name is None:
-                raise ValueError("QGym profile must include data.init_args.dataset_name")
-            spec = DatasetRegistry().get(dataset_name)
-            N = int(spec.env_N)
-            mu = (
-                torch.tensor(spec.env_mu_fixed, dtype=torch.float32)
-                if spec.env_mu_fixed is not None
-                else build_mu(cfg)[0]
-            )
-            lam = (
-                float(spec.env_lam)
-                if spec.env_lam is not None
-                else float(build_mu(cfg)[1])
-            )
-        else:
-            mu, lam = build_mu(cfg)
-            N = int(cfg.env.N)
+        data_init_args = dict(profile.data.init_args)
+        dataset_name = data_init_args.get("dataset_name")
+        if dataset_name is None:
+            raise ValueError("QGym profile must include data.init_args.dataset_name")
+        spec = DatasetRegistry().get(dataset_name)
+        N = int(spec.env_N)
+        mu = (
+            torch.tensor(spec.env_mu_fixed, dtype=torch.float32)
+            if spec.env_mu_fixed is not None
+            else build_mu(cfg)[0]
+        )
+        lam = (
+            float(spec.env_lam)
+            if spec.env_lam is not None
+            else float(build_mu(cfg)[1])
+        )
         model = build_model(cfg, N=N, d_xi=d_xi)
 
         if str(cfg.get("certificate_status", "exact")) == "exact":
@@ -268,20 +262,12 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             _set_model_certificate_constant(cfg, model_constant)
             OmegaConf.save(config=cfg, f=paths.configs / "resolved_config.yaml", resolve=True)
         torch.save(model.state_dict(), paths.artifacts / "initial_model_state.pt")
-        num_workers_raw: object = resolved_trainer.get("_num_workers")
-        num_workers: int | None = num_workers_raw if isinstance(num_workers_raw, int) else None
 
         # ── DataModule from datatype profile ───────────────────────────
         data_cfg = profile.data
         data_init_args = dict(data_cfg.init_args)
-        if datatype == "synthetic":
-            from certiqnet.data.synthetic.datamodule import CertiQNetDataModule
-            data_init_args.setdefault("adapter", adapter)
-            dm = CertiQNetDataModule(N=N, mu=mu, **data_init_args)
-        elif datatype == "qgym":
-            from certiqnet.data.qgym.datamodule import QGymDataModule
-            data_init_args.setdefault("N", N)
-            dm = QGymDataModule(mu=mu, **data_init_args)
+        data_init_args.setdefault("N", N)
+        dm = QGymDataModule(mu=mu, **data_init_args)
         dm.datatype = datatype
 
         # ── Dataset status logging ─────────────────────────────────────
@@ -466,7 +452,6 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
                 pass
 
     # Prefer the best checkpoint (by val/selection_score) over final epoch weights.
-    best_ckpt_loaded = False
     for cb in trainer.callbacks:
         if isinstance(cb, pl.callbacks.ModelCheckpoint) and cb.best_model_path:
             best_path = Path(cb.best_model_path)
@@ -483,7 +468,6 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
                         model.load_state_dict(cleaned)
                     else:
                         model.load_state_dict(best_state)
-                    best_ckpt_loaded = True
                     run_logger.info(
                         "loaded_best_checkpoint",
                         path=str(best_path),
@@ -578,7 +562,7 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
         d_xi = int(getattr(adapter, "context_dim", 0))
 
         datatype = str(cfg.get("datatype", "qgym"))
-        profile = cfg.get(datatype) if datatype in ("synthetic", "qgym") else None
+        profile = cfg.get(datatype) if datatype == "qgym" else None
 
         if datatype == "qgym":
             data_init_args = dict(profile.data.init_args) if profile is not None else {}
@@ -587,9 +571,6 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
             N_audit = int(spec.env_N)
             mu = torch.tensor(spec.env_mu_fixed, dtype=torch.float32) if spec.env_mu_fixed is not None else build_mu(cfg)[0]
             lam = float(spec.env_lam) if spec.env_lam is not None else float(build_mu(cfg)[1])
-        else:
-            mu, lam = build_mu(cfg)
-            N_audit = int(cfg.env.N)
         model = build_model(cfg, N=N_audit, d_xi=d_xi)
         if str(cfg.get("certificate_status", "exact")) == "exact":
             _validate_exact_certificate_constant(model, context="audits")
@@ -619,7 +600,7 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
             _, diag = model(Q_bank, mu_bank, xi_bank, training_mode=False)
 
         violation = (diag.A_final - diag.B_Q).clamp(min=0.0)
-        audit_env_name = str(data_init_args.get("dataset_name", "")) if datatype == "qgym" else str(cfg.env.mu_mode)
+        audit_env_name = str(data_init_args.get("dataset_name", ""))
         audit_metrics = aggregate_metrics(
             model_name=str(cfg.model._target_).split(".")[-1],
             env_name=audit_env_name,
@@ -701,7 +682,7 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
         d_xi = int(getattr(adapter, "context_dim", 0))
 
         datatype = str(cfg.get("datatype", "qgym"))
-        profile = cfg.get(datatype) if datatype in ("synthetic", "qgym") else None
+        profile = cfg.get(datatype) if datatype == "qgym" else None
 
         if datatype == "qgym":
             data_init_args = dict(profile.data.init_args) if profile is not None else {}
@@ -710,9 +691,6 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
             N_bl = int(spec.env_N)
             mu = torch.tensor(spec.env_mu_fixed, dtype=torch.float32) if spec.env_mu_fixed is not None else build_mu(cfg)[0]
             lam = float(spec.env_lam) if spec.env_lam is not None else float(build_mu(cfg)[1])
-        else:
-            mu, lam = build_mu(cfg)
-            N_bl = int(cfg.env.N)
         model = build_model(cfg, N=N_bl, d_xi=d_xi)
         if str(cfg.get("certificate_status", "exact")) == "exact":
             _validate_exact_certificate_constant(model, context="baseline comparisons")

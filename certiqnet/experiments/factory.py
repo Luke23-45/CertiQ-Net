@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any, TypeVar
+from typing import TypeVar
 
 import torch
 from omegaconf import DictConfig, OmegaConf

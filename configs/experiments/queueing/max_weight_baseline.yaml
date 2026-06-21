@@ -1,7 +1,0 @@
-# @package _global_
-# ──────────────────────────────────────────────────────────────────────────────
-# configs/experiments/queueing/max_weight_baseline.yaml
-# ──────────────────────────────────────────────────────────────────────────────
-defaults:
-  - baseline
-  - /model: max_weight

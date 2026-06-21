@@ -40,7 +40,7 @@ dev = [
 certiqnet-train = "certiqnet.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["certiqnet*"]
+include = ["certiqnet*", "certiq_net*"]
 
 [tool.ruff]
 line-length = 100

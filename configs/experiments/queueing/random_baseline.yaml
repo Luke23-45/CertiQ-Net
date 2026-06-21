@@ -1,7 +1,0 @@
-# @package _global_
-# ──────────────────────────────────────────────────────────────────────────────
-# configs/experiments/queueing/random_baseline.yaml
-# ──────────────────────────────────────────────────────────────────────────────
-defaults:
-  - baseline
-  - /model: random

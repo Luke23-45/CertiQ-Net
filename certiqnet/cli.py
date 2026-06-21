@@ -28,7 +28,7 @@ class CertiQNetCLI(LightningCLI):
 
 
 def main():
-    cli = CertiQNetCLI(
+    CertiQNetCLI(
         model_class=BaseCertiQLightningModule,
         datamodule_class=pl.LightningDataModule,
         subclass_mode_model=True,

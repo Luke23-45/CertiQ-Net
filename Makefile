@@ -4,10 +4,10 @@ test:
 	pytest tests/ -v --cov=certiqnet --cov-report=term-missing -n auto
 
 train:
-	python certiqnet/scripts/train.py trainer=fast_dev logger=csv model=certiq_index env=family_a
+	python certiqnet/scripts/train.py trainer=fast_dev logger=csv model=certiq_index
 
 audit:
-	python certiqnet/scripts/audit_state_bank.py
+	python -m certiqnet.experiments.pipeline audit
 
 lint:
 	ruff check certiqnet/ tests/

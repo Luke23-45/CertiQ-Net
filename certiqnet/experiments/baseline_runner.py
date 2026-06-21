@@ -258,7 +258,7 @@ def run_baseline_comparison(
                 parts.append(f"violation_rate={vr_val:.4f}")
             _log(f"── Baseline [{idx}/{total}] {name} ── {'  '.join(parts)}")
             metrics.append(result)
-        except Exception as exc:
+        except Exception:
             _log(f"-- Baseline [{idx}/{total}] {name} -- (FAILED)")
             print(f"\n[ERROR] Exception in baseline '{name}':", file=sys.stderr)
             traceback.print_exc()
