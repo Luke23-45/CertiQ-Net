@@ -1,26 +1,14 @@
-"""Backwards-compatibility shim — authoritative code has moved.
+"""Backwards-compatibility shim — see certiqnet.experiments for new code."""
 
-All symbols are re-exported from ``studies.runner.common``.
-Import from there directly for new code.
-"""
+from certiqnet.experiments.runner import run_study
+from certiqnet.experiments.stages._base import CONFIG_DIR, ROOT
+from certiqnet.experiments.catalog.specs import StudySpec
 
-from __future__ import annotations
-
-# Re-export everything from the new canonical location.
-from studies.runner.common import (  # noqa: F401
-    ROOT,
-    CONFIG_DIR,
-    StudyRunnerSpec,
-    compose_study_config,
-    run_stage,
-    run_study_family,
-)
+StudyRunnerSpec = StudySpec
 
 __all__ = [
     "ROOT",
     "CONFIG_DIR",
     "StudyRunnerSpec",
-    "compose_study_config",
-    "run_stage",
-    "run_study_family",
+    "run_study",
 ]

@@ -28,7 +28,7 @@ def tail_size(Q: Tensor, mu: Tensor, beta: float) -> Tensor:
 def R0_bound(lam: float, mu: Tensor, beta: float, pi: Tensor) -> Tensor:
     """Radius bound R0 based on arrival rate and stationary distribution."""
     mu_beta = mu.pow(-beta)
-    return (lam * (mu_beta * pi).sum()).sqrt()
+    return (lam * (mu_beta * pi).sum(dim=-1)).sqrt()
 
 
 def C0_bound(lam: float, mu: Tensor, beta: float) -> float:

@@ -1,12 +1,10 @@
-"""Training entrypoints.
+"""
+Hydra entrypoint for CertiQ-Net training experiments.
 
-Usage
------
-New (LightningCLI):
-    python certiqnet/scripts/train.py --cli --config configs/experiments/queueing/certiq_index.yaml
-
-Legacy (Hydra):
-    python certiqnet/scripts/train.py model=certiq_index adapter=queueing trainer=default
+Usage:
+    python -m certiqnet.scripts.train                    (uses default config)
+    python -m certiqnet.scripts.train --config-name experiments/main_queueing 'project.seed=42'
+    python -m certiqnet.scripts.train --cli --config path/to/config.yaml   (LightningCLI mode)
 """
 
 from __future__ import annotations
@@ -19,9 +17,9 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+CONFIG_DIR = ROOT / "configs"
 
-# ── CLI mode (LightningCLI, BGSL-style) ─────────────────────────────
-
+# ── CLI mode (LightningCLI) ──────────────────────────────────────────
 
 _CLI_TRAINER_KEYS = {
     "accelerator", "strategy", "devices", "num_nodes", "precision",
@@ -37,8 +35,8 @@ _CLI_TRAINER_KEYS = {
     "reload_dataloaders_every_n_epochs", "default_root_dir",
 }
 
+
 def _run_cli(config_path: str, unknown_args: list[str]) -> None:
-    import sys
     import tempfile
     import yaml
     from omegaconf import OmegaConf
@@ -93,48 +91,32 @@ def _run_cli(config_path: str, unknown_args: list[str]) -> None:
     cli_main()
 
 
-# ── Legacy mode (Hydra, backward-compat) ────────────────────────────
+# ── Hydra mode ───────────────────────────────────────────────────────
 
 
-def _run_legacy(config_path: str | None = None, overrides: list[str] | None = None) -> None:
-    from omegaconf import OmegaConf
+def _run_hydra(config_name: str, overrides: list[str]) -> None:
+    from hydra import compose, initialize_config_dir
+    from certiqnet.train.runner import run_training
 
-    from certiqnet.experiments.pipeline import run_training
-
-    # Load base config
-    base_cfg = OmegaConf.load(ROOT / "configs" / "config.yaml")
-    cfg = OmegaConf.create()
-    defaults = base_cfg.get("defaults", [])
-    for d in defaults:
-        if isinstance(d, str):
-            continue  # skip special keys like _self_
-        for key, val in d.items():
-            if key == "_self_":
-                continue
-            p = ROOT / "configs" / key / f"{val}.yaml"
-            if p.exists():
-                sub = OmegaConf.load(p)
-                cfg = OmegaConf.merge(cfg, sub)
-    cfg = OmegaConf.merge(cfg, base_cfg)
-
-    if config_path:
-        exp_cfg = OmegaConf.load(config_path)
-        cfg = OmegaConf.merge(cfg, exp_cfg)
-
-    if overrides:
-        overrides_merged = OmegaConf.from_cli(overrides)
-        cfg = OmegaConf.merge(cfg, overrides_merged)
+    with initialize_config_dir(version_base="1.3", config_dir=str(CONFIG_DIR)):
+        cfg = compose(config_name=config_name, overrides=list(overrides))
 
     run_training(cfg, cwd=ROOT)
 
 
-# ── Dispatch ────────────────────────────────────────────────────────
+# ── Dispatch ─────────────────────────────────────────────────────────
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CertiQ-Net training")
     parser.add_argument("--cli", action="store_true", help="Use LightningCLI mode")
-    parser.add_argument("--config", type=str, default=None, help="Path to config YAML")
+    parser.add_argument("--config", type=str, default=None, help="Path to config YAML (CLI mode)")
+    parser.add_argument(
+        "--config-name",
+        type=str,
+        default="experiments/main_queueing",
+        help="Config name relative to configs/ (Hydra mode)",
+    )
     args, unknown = parser.parse_known_args()
 
     if args.cli:
@@ -142,8 +124,8 @@ if __name__ == "__main__":
             print("ERROR: --cli requires --config <path>")
             sys.exit(1)
         _run_cli(args.config, unknown)
-    elif args.config:
-        _run_legacy(config_path=args.config)
     else:
-        sys.argv = [sys.argv[0]] + unknown
-        _run_legacy()
+        if args.config is not None:
+            print("ERROR: --config is only valid in --cli mode. Use --config-name for Hydra mode.")
+            sys.exit(1)
+        _run_hydra(args.config_name, unknown)

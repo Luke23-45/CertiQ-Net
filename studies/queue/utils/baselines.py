@@ -1,6 +1,4 @@
-"""Run baseline comparison rollouts and persist dual metric tables."""
-
-from __future__ import annotations
+"""Deprecated — use ``python -m certiqnet.scripts.baselines`` instead."""
 
 import sys
 from pathlib import Path
@@ -12,10 +10,10 @@ if str(ROOT) not in sys.path:
 import hydra
 from omegaconf import DictConfig
 
-from certiqnet.experiments.pipeline import run_baseline_paper_comparison
+from certiqnet.eval.baselines import run_baseline_paper_comparison
 
 
-@hydra.main(version_base="1.3", config_path="../configs", config_name="config")  # type: ignore[untyped-decorator]
+@hydra.main(version_base="1.3", config_path="../configs", config_name="config")
 def main(cfg: DictConfig) -> None:
     run_baseline_paper_comparison(cfg, cwd=ROOT)
 

@@ -1,6 +1,4 @@
-"""Standalone state-bank certificate audit with platform info."""
-
-from __future__ import annotations
+"""Deprecated — use ``python -m certiqnet.scripts.audit`` instead."""
 
 import sys
 from pathlib import Path
@@ -12,10 +10,10 @@ if str(ROOT) not in sys.path:
 import hydra
 from omegaconf import DictConfig
 
-from certiqnet.experiments.pipeline import run_state_bank_audit
+from certiqnet.eval.audit import run_state_bank_audit
 
 
-@hydra.main(version_base="1.3", config_path="../configs", config_name="config")  # type: ignore[untyped-decorator]
+@hydra.main(version_base="1.3", config_path="../configs", config_name="config")
 def main(cfg: DictConfig) -> None:
     run_state_bank_audit(cfg, cwd=ROOT)
 
