@@ -24,8 +24,8 @@ from certiqnet.experiments.catalog.registry import (
     get_study_entry,
     print_study_listing,
 )
-from certiqnet.experiments.logging import BufferedExperimentLogger as ExperimentLogger
-from certiqnet.experiments.paths import (
+from certiqnet.experiments.persistence.logging import BufferedExperimentLogger as ExperimentLogger
+from certiqnet.experiments.persistence.paths import (
     RunPaths,
     create_run_paths,
     make_run_id,

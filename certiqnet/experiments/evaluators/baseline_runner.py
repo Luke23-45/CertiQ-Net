@@ -13,7 +13,7 @@ import torch
 
 from certiqnet.adapters.common.base import DispatchAdapter
 from certiqnet.adapters.queueing.adapter import QueueingAdapter
-from certiqnet.experiments.metrics import ExperimentMetrics, aggregate_metrics, save_metrics
+from certiqnet.experiments.evaluators.metrics import ExperimentMetrics, aggregate_metrics, save_metrics
 from certiqnet.utils.progress import progress
 from certiqnet.models.baselines import (
     AnalyticBackbonePolicy,

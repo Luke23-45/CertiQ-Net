@@ -7,7 +7,7 @@ train:
 	python certiqnet/scripts/train.py trainer=fast_dev logger=csv model=certiq_index
 
 audit:
-	python -m certiqnet.experiments.pipeline audit
+	python run.py --study main_queueing --dry-run
 
 lint:
 	ruff check certiqnet/ tests/

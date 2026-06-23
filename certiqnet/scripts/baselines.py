@@ -29,7 +29,7 @@ def main() -> None:
     if args.run_dir:
         run_dir = Path(args.run_dir).resolve()
     else:
-        from certiqnet.experiments.checkpoint_state import read_last_run
+        from certiqnet.experiments.persistence.checkpoint import read_last_run
         experiment_root = Path(args.experiment).resolve()
         last = read_last_run(experiment_root)
         if last is None:

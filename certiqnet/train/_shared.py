@@ -7,8 +7,8 @@ from pathlib import Path
 
 import torch
 
-from certiqnet.experiments.logging import BufferedExperimentLogger as ExperimentLogger
-from certiqnet.experiments.paths import RunPaths
+from certiqnet.experiments.persistence.logging import BufferedExperimentLogger as ExperimentLogger
+from certiqnet.experiments.persistence.paths import RunPaths
 
 
 def validate_exact_certificate_constant(model: torch.nn.Module, *, context: str) -> float:

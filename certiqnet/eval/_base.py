@@ -4,9 +4,9 @@ from pathlib import Path
 
 from omegaconf import DictConfig, OmegaConf
 
-from certiqnet.experiments.checkpoint_state import read_last_run
-from certiqnet.experiments.logging import BufferedExperimentLogger as ExperimentLogger
-from certiqnet.experiments.paths import RunPaths, slugify
+from certiqnet.experiments.persistence.checkpoint import read_last_run
+from certiqnet.experiments.persistence.logging import BufferedExperimentLogger as ExperimentLogger
+from certiqnet.experiments.persistence.paths import RunPaths, slugify
 from certiqnet.experiments.runner import experiment_name_from_cfg, prepare_run
 
 

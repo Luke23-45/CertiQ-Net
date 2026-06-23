@@ -15,13 +15,13 @@ from omegaconf import DictConfig, OmegaConf
 
 from certiqnet.data.qgym.datamodule import QGymDataModule
 from certiqnet.data.registry import DatasetRegistry
-from certiqnet.experiments.checkpoint_state import (
+from certiqnet.experiments.persistence.checkpoint import (
     save_checkpoint_state,
     save_last_run,
 )
-from certiqnet.experiments.factory import build_model, build_mu
-from certiqnet.experiments.logging import BufferedExperimentLogger as ExperimentLogger
-from certiqnet.experiments.paths import RunPaths, slugify
+from certiqnet.experiments.evaluators.factory import build_model, build_mu
+from certiqnet.experiments.persistence.logging import BufferedExperimentLogger as ExperimentLogger
+from certiqnet.experiments.persistence.paths import RunPaths, slugify
 from certiqnet.experiments.runner import experiment_name_from_cfg, prepare_run
 from certiqnet.train._shared import (
     set_model_certificate_constant,
