@@ -4,6 +4,19 @@
 
 The registry consists of **one file**: `datasets.yaml`.  It defines **every QGym dataset** in a compact structure with a shared `defaults` section and per-dataset overrides.  The parser deep-merges each dataset entry onto the defaults so that only diverging parameters need to be written.
 
+### Default dataset
+
+The top-level `default` field declares which dataset is the primary target:
+
+```yaml
+default: re-reentrant_3_hyper
+```
+
+Used by:
+- `DatasetRegistry.get_default()` — programmatic lookup (raises `KeyError` if missing or the named dataset doesn't exist)
+- `collect_qgym.py collect` — when called without a dataset name, falls back to the registry default
+- Experiment configs — hardcode the dataset they target (currently all point to `re-reentrant_3_hyper`)
+
 The file spans **two separate systems** with different parameter ownership:
 
 ```
@@ -104,10 +117,11 @@ Every parameter in the registry YAML, exhaustively documented.
 
 ### File Structure
 
-The file has two top-level keys:
+The file has three top-level keys:
 
 | Key | Required | Type | Purpose |
 |-----|----------|------|---------|
+| `default` | No | `str` | Name of the default / primary dataset (used by `get_default()`) |
 | `defaults` | No | `dict` | Shared parameters deep-merged into every dataset |
 | `datasets` | Yes | `dict[str, dict]` | Per-dataset overrides; each key is the dataset name |
 
@@ -724,6 +738,8 @@ These are consumed by CertiQ-Net's `env_loader.py` and removed from the config d
 
 ```
 datasets.yaml
+│
+├── default: ───────────────── declares the primary dataset name
 │
 ├── defaults: ──────── shared, deep-merged into every dataset entry
 │

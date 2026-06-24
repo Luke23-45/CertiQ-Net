@@ -20,5 +20,12 @@ main_queueing_study = StudySpec(
             adapter="queueing",
             seeds=[42],
         ),
+        TrainingVariant(
+            label="re-reentrant_3_hyper",
+            dataset="re-reentrant_3_hyper",
+            model="certiq_index",
+            adapter="queueing",
+            seeds=[42],
+        ),
     ],
 )

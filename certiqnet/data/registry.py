@@ -413,6 +413,31 @@ class DatasetRegistry:
         self.get(name)  # validates existence
         return (self._output_root / name).resolve()
 
+    def get_default(self) -> str:
+        """Return the name of the default dataset declared in the registry.
+
+        Reads the top-level ``default`` key from the first registry YAML
+        that defines it (typically ``datasets.yaml``).  Raises
+        ``KeyError`` if no ``default`` field is found or the named
+        dataset does not exist.
+        """
+        for yaml_path in sorted(self._registry_dir.glob("*.yaml")):
+            with open(yaml_path) as f:
+                raw = yaml.safe_load(f)
+            if isinstance(raw, dict) and "default" in raw:
+                name = raw["default"]
+                if name in self.specs:
+                    return name
+                raise KeyError(
+                    f"Registry YAML {yaml_path} declares default='{name}' "
+                    f"but no dataset with that name exists. "
+                    f"Available: {', '.join(self.list_datasets())}"
+                )
+        raise KeyError(
+            "No 'default' field found in any registry YAML. "
+            "Add 'default: <dataset_name>' to datasets.yaml."
+        )
+
     # ── Existence & integrity ─────────────────────────────────────────
 
     def exists(self, name: str) -> bool:

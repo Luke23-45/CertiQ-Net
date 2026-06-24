@@ -83,7 +83,15 @@ def cmd_collect(args: argparse.Namespace) -> None:
     """Collect a dataset by registry name."""
     registry = DatasetRegistry()
     manager = DatasetCollectionManager(registry)
+
     name = args.dataset_name
+    if name is None:
+        try:
+            name = registry.get_default()
+            print(f"[collect] No dataset specified — using registry default '{name}'.")
+        except KeyError as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
 
     if name not in registry:
         print(f"Error: unknown dataset '{name}'.")
@@ -216,7 +224,8 @@ def main() -> None:
     p_collect = subparsers.add_parser(
         "collect", help="Collect a dataset by registry name"
     )
-    p_collect.add_argument("dataset_name", type=str, help="Registered dataset name")
+    p_collect.add_argument("dataset_name", type=str, nargs="?", default=None,
+                           help="Registered dataset name (default: registry default)")
     p_collect.add_argument("--force", action="store_true", help="Overwrite existing")
     p_collect.add_argument(
         "--no-verify", action="store_true", help="Skip post-collection verification"

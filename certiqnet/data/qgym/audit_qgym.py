@@ -30,6 +30,13 @@ ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Ensure UTF-8 output on Windows consoles
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from certiqnet.adapters.qgym.config import QGymEnvConfig, resolve_env_config_path
 from certiqnet.data.registry import DatasetRegistry, dataset_spec_hash
 
@@ -100,7 +107,14 @@ def _load_all_shards(dataset_dir: Path, split: str) -> list[dict]:
     if not split_dir.exists():
         return []
     shard_files = sorted(split_dir.glob("*.pt"))
-    return [torch.load(f, weights_only=True) for f in shard_files]
+
+    def _load_one(path: Path) -> dict:
+        try:
+            return torch.load(path, weights_only=True)
+        except Exception:
+            return torch.load(path, weights_only=False)
+
+    return [_load_one(f) for f in shard_files]
 
 
 def _read_metadata(dataset_dir: Path) -> dict | None:
@@ -184,16 +198,21 @@ def _audit_schema(shards: list[dict], split_name: str) -> AuditCheck:
 def _audit_cross_shard_consistency(shards: list[dict], split_name: str) -> AuditCheck:
     """Check mu, h, and N are consistent across all shards in this split."""
     check = AuditCheck()
+    check.details["n_shards"] = len(shards)
 
-    if len(shards) < 2:
-        check.details["n_shards"] = len(shards)
+    if not shards:
         return check
 
-    check.details["n_shards"] = len(shards)
     ref_N = shards[0]["Q"].shape[-1] if "Q" in shards[0] else None
-
     mu_ref = shards[0].get("mu")
     h_ref = shards[0].get("h")
+
+    check.details["N"] = ref_N
+    check.details["mu"] = mu_ref.tolist() if mu_ref is not None else None
+    check.details["h"] = h_ref.tolist() if h_ref is not None else None
+
+    if len(shards) < 2:
+        return check
 
     for i, d in enumerate(shards[1:], start=1):
         if ref_N is not None and "Q" in d:
@@ -210,10 +229,6 @@ def _audit_cross_shard_consistency(shards: list[dict], split_name: str) -> Audit
         h_i = d.get("h")
         if h_ref is not None and h_i is not None and not torch.equal(h_ref, h_i):
             check.warnings.append(f"shard_{i}: h differs from shard_0 (may be intentional)")
-
-    check.details["N"] = ref_N
-    check.details["mu"] = mu_ref.tolist() if mu_ref is not None else None
-    check.details["h"] = h_ref.tolist() if h_ref is not None else None
 
     return check
 
@@ -456,7 +471,12 @@ def _audit_spec_alignment(
         check.passed = False
         return check
 
-    data_N = first_shard["Q"].shape[-1] if "Q" in first_shard else None
+    data_N = first_shard.get("Q")
+    if data_N is not None:
+        data_N = data_N.shape[-1]
+    else:
+        check.passed = False
+        check.errors.append("First shard has no 'Q' key — cannot determine N")
 
     # Resolve and load the env config
     env_cfg = _read_env_config(registry_spec.env)
@@ -600,19 +620,27 @@ def audit_dataset(name: str, verbose: bool = False) -> dict:
         all_errors.extend(spec_alignment.errors)
     all_warnings.extend(spec_alignment.warnings)
 
-    # Metadata consistency check
+    # Metadata consistency check (metadata stores stats over ALL collected states)
     meta = _read_metadata(dataset_dir)
     meta_check = AuditCheck()
     if meta is not None:
         meta_Q_mean = meta.get("mean_Q")
         if meta_Q_mean is not None and split_results:
-            train_stats = split_results[0].get("stats", {}).get("details", {})
-            actual_mean = train_stats.get("Q", {}).get("mean")
-            if actual_mean is not None and abs(float(meta_Q_mean) - actual_mean) > 1.0:
-                meta_check.warnings.append(
-                    f"metadata.yaml mean_Q={meta_Q_mean} differs from actual "
-                    f"train mean_Q={actual_mean}"
-                )
+            total = 0
+            weighted_sum = 0.0
+            for s in split_results:
+                n = s["n_states"]
+                mean = s.get("stats", {}).get("details", {}).get("Q", {}).get("mean")
+                if n and mean is not None:
+                    weighted_sum += mean * n
+                    total += n
+            if total:
+                actual_mean = weighted_sum / total
+                if abs(float(meta_Q_mean) - actual_mean) > 1.0:
+                    meta_check.warnings.append(
+                        f"metadata.yaml mean_Q={meta_Q_mean} differs from actual "
+                        f"all-split mean_Q={actual_mean:.4f}"
+                    )
         if meta.get("spec_hash") and meta["spec_hash"] != dataset_spec_hash(spec):
             meta_check.warnings.append(
                 "metadata.yaml spec_hash does not match registry spec"

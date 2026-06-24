@@ -3,6 +3,10 @@
 # inherited by every dataset via Python-side deep merge.  Each entry
 # under ``datasets`` only needs to specify what differs from the defaults.
 #
+# ``default`` declares which dataset is the primary / production target.
+# Used by ``DatasetRegistry.get_default()`` for CLI arg fallback and
+# study-runner default selection.
+#
 # Adding a new topology:
 #   1. Create a YAML anchor: ``new_topology: &nt`` with ``env``, ``env_N``
 #      and optionally ``env_mu_fixed`` / ``env_lam``.
@@ -12,6 +16,8 @@
 #
 # Adding a new variant of an existing topology:
 #   Use ``<<: <existing_anchor>`` and override only what differs.
+
+default: re-reentrant_3_hyper
 
 defaults:
   output_dir: final_dataset/qgym
