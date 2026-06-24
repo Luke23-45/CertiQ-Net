@@ -2,7 +2,9 @@
 
 ## Architecture Overview
 
-Each registry YAML file in this directory defines **one QGym dataset** — the single source of truth for both collection and training. However, the file spans **two separate systems** with different parameter ownership:
+The registry consists of **one file**: `datasets.yaml`.  It defines **every QGym dataset** in a compact structure with a shared `defaults` section and per-dataset overrides.  The parser deep-merges each dataset entry onto the defaults so that only diverging parameters need to be written.
+
+The file spans **two separate systems** with different parameter ownership:
 
 ```
 Registry YAML  (this file)
@@ -27,20 +29,89 @@ Registry YAML  (this file)
                                           (mixes QGym states + synthetic)
 ```
 
-**Two config files are required per dataset:**
+**Two config files are required per topology:**
 
 | File | Location | Purpose |
 |------|----------|---------|
-| **Registry YAML** | `configs/dataset/qgym/registry/<name>.yaml` | Collection + training parameters |
+| **Registry YAML** | `configs/dataset/qgym/registry/datasets.yaml` | All datasets: collection + training params |
 | **Env YAML** | `extern/QGym/configs/env/<name>.yaml` | Queueing topology (links to .npy data) |
 
 The `.npy` data files live in `extern/QGym/configs/env_data/<env_type>/`.
 
 ---
 
+## File Format: Multi-Dataset YAML with Inheritance
+
+```yaml
+defaults:
+  output_dir: final_dataset/qgym
+  collection:
+    n_steps: 500000
+    n_valid: 10000
+    ...
+
+datasets:
+  reentrant_2: &re2
+    env: extern/QGym/configs/env/reentrant_2.yaml
+    env_N: 6
+    ...
+
+  reentrant_2_debug:
+    <<: *re2
+    collection: {n_steps: 10000, n_valid: 1000, ...}
+    training_defaults: {n_samples: 256}
+```
+
+**Inheritance model** (two-layer):
+
+| Layer | Source | Mechanism |
+|-------|--------|-----------|
+| 1. Global defaults | `defaults:` section | Python `_deep_merge()` — recursive dict merge |
+| 2. Topology anchors | YAML `&anchor` / `<<:` | Standard YAML 1.1 merge key (shallow) |
+
+The `defaults` section sets shared parameters once. Each `datasets` entry inherits from `defaults` via deep merge — nested `collection` and `training_defaults` dicts are merged recursively, not replaced wholesale.  YAML anchors (`&re2` / `<<: *re2`) share topology-specific fields (`env`, `env_N`, `env_mu_fixed`, `env_lam`) across production and debug variants.
+
+### Adding a new topology
+
+```yaml
+new_topology: &nt
+  env: extern/QGym/configs/env/new_topology.yaml
+  env_N: 12
+  env_lam: 0.05
+
+new_topology_debug:
+  <<: *nt
+  collection: {n_steps: 10000, n_valid: 1000, n_test: 1000, shard_size: 5000}
+  training_defaults: {n_samples: 256}
+```
+
+### Adding a variant to an existing topology
+
+```yaml
+reentrant_2_large:
+  <<: *re2
+  collection:
+    n_steps: 2000000
+    n_valid: 50000
+    n_test: 50000
+```
+
+---
+
 ## Section 1: Registry YAML Parameters
 
 Every parameter in the registry YAML, exhaustively documented.
+
+### File Structure
+
+The file has two top-level keys:
+
+| Key | Required | Type | Purpose |
+|-----|----------|------|---------|
+| `defaults` | No | `dict` | Shared parameters deep-merged into every dataset |
+| `datasets` | Yes | `dict[str, dict]` | Per-dataset overrides; each key is the dataset name |
+
+`name` is **not** a top-level key — it is inferred from the dataset key in `datasets`.
 
 ### 1.1 Identity & Topology
 
@@ -85,55 +156,72 @@ The resolved YAML defines the queueing topology. The numeric network/mu matrices
 
 ---
 
-#### `env_N` ⚠️ REDUNDANT
+#### `env_N`
 | | |
 |---|---|
 | **Type** | `int \| None` |
 | **Default** | `null` (not set) |
-| **Owner** | CertiQ-Net (metadata only) |
+| **Owner** | CertiQ-Net |
 | **Scope** | Topology-specific |
-| **Status** | **DERIVED** — can be obtained from `len(h)` in env YAML |
+| **Status** | **Derived convenience** — can be obtained from `len(h)` or `.npy` matrix dims |
 
-**Controls**: Nothing in any code path. Pure metadata for human readability. `env_N = q` (number of queues) = second dimension of mu/network matrices.
+**Controls**: Cache of the number of queues `N`. Used as fast-path fallback in:
+- `train/runner.py:165` — model architecture dimension
+- `eval/audit.py:60` — state bank dimension
+- `eval/baselines.py:58` — model dimension
+- `experiments/runner/engine.py:67` — run name tag
 
-**Derived from**: The env YAML's `h` field length (e.g., `h: [1,1,1,1,1,1]` → N=6).
+When `None`, all four consumers fall back to computing from the env config.
 
-**Recommendation**: Omit from registry YAML. If needed for config validation, compute it from the env config at load time.
+**Derived from**: The env YAML's `h` field length (e.g., `h: [1,1,1,1,1,1]` → N=6), or the second dimension of the `mu` / `network` `.npy` matrices.
+
+**Recommendation**: Include in topology anchor for performance (avoids loading `.npy` at parse time). Omission is safe — consumers compute on demand.
 
 ---
 
-#### `env_mu_fixed` ⚠️ REDUNDANT
+#### `env_mu_fixed`
 | | |
 |---|---|
 | **Type** | `list[float] \| None` |
 | **Default** | `null` (not set) |
-| **Owner** | CertiQ-Net (metadata only) |
+| **Owner** | CertiQ-Net |
 | **Scope** | Topology-specific |
-| **Status** | **DERIVED** — `(network × mu).sum(dim=0)` from .npy files |
+| **Status** | **Derived convenience** — `(network × mu).sum(dim=0)` from .npy files |
 
-**Controls**: Nothing. Never read by any collection or training code. Pure human-readable documentation of the effective per-queue service rate vector.
+**Controls**: Cache of the effective per-queue service rate vector. Used as fast-path fallback in:
+- `train/runner.py:166-169` — mu tensor for QGymDataModule
+- `eval/audit.py:61` — state bank generator
+- `eval/baselines.py:59` — baseline comparison
 
-**Derived from**: `(network_npy × mu_npy).sum(axis=0)` — the elementwise product of the (s,q) network and mu matrices summed over servers. For `reentrant_2`:
+When `None`, all three consumers fall back to `build_mu(cfg)` which loads from the experiment config (non-QGym fallback path).
+
+**Derived from**: `(network_npy × mu_npy).sum(axis=0)` — the elementwise product of the `(s,q)` network and mu matrices summed over servers. For `reentrant_2`:
 ```
 network:  [[1,1,1,0,0,0],          mu:  [[0.125,0.5,0.25,0,0,0],
           [0,0,0,1,1,1]]                [0,0,0,0.167,0.143,1.0]]
 → effective_mu = [0.125, 0.5, 0.25, 0.167, 0.143, 1.0]
 ```
 
-**Recommendation**: Omit from registry YAML. If needed for debugging, compute via utility script.
+**Recommendation**: Include for topologies where it's known (like `reentrant_2`). Omit for others — the fallback path handles it.
 
 ---
 
-#### `env_lam` ⚠️ REDUNDANT
+#### `env_lam`
 | | |
 |---|---|
 | **Type** | `float \| None` |
 | **Default** | `null` (not set) |
-| **Owner** | CertiQ-Net (metadata only) |
+| **Owner** | CertiQ-Net |
 | **Scope** | Topology-specific |
-| **Status** | **DERIVED** — `sum(lam_npy)` from .npy file |
+| **Status** | **Derived convenience** — `sum(lam_npy)` from .npy file |
 
-**Controls**: Nothing. Never read by any collection or training code. Pure metadata.
+**Controls**: Cache of the sum of per-queue arrival rates. Used as fast-path fallback in:
+- `train/runner.py:171-174` — lam scalar for cost computation
+- `eval/audit.py:62` — state bank generator
+- `eval/baselines.py:60` — baseline comparison
+- `experiments/runner/engine.py:68` — run name tag
+
+When `None`, all four consumers fall back to `build_mu(cfg)`.
 
 **Derived from**: `sum(lam_vector)` where lam is loaded from `env_type_lam.npy`. This is NOT the throughput — it is the sum of per-queue independent Poisson arrival rates. Different topologies distribute arrivals differently:
 
@@ -145,7 +233,7 @@ network:  [[1,1,1,0,0,0],          mu:  [[0.125,0.5,0.25,0,0,0],
 
 All three have the **same bottleneck utilization ρ = 0.514** at the bottleneck queues (μ=0.125, entry rate=0.064286). The env_lam differs only because of different numbers of entry points.
 
-**Recommendation**: Omit from registry YAML. Compute from lam `.npy` on demand.
+**Recommendation**: Include in topology anchor for performance. Omission is safe — consumers compute on demand.
 
 ---
 
@@ -289,18 +377,14 @@ All parameters under the `collection:` key are consumed by `DatasetCollectionMan
 
 ---
 
-#### `collection.batch_size_env` ⚠️ EFFECTIVELY UNUSED
+#### `collection.batch_size_env` ❌ REMOVED
 | | |
 |---|---|
-| **Type** | `int` |
-| **Default** | `1` |
-| **Owner** | QGym (rarely used) |
-| **Scope** | Common |
-| **Status** | **ALWAYS 1** in practice |
+| **Status** | **Removed** from the new YAML format; hardcoded to `1` in `CollectionConfig` |
 
-**Controls**: Number of parallel QGym environment instances. When > 1, multiple CTMC simulations run in parallel via batched tensor operations in `DiffDiscreteEventSystem`. States from all batch elements are interleaved into the output.
+**Controls**: Number of parallel QGym environment instances. When > 1, multiple CTMC simulations run in parallel via batched tensor operations in `DiffDiscreteEventSystem`.
 
-**In practice**: Never set to > 1 in any existing config. The default of 1 is always used. Parallel environments would speed up collection but are unnecessary.
+**History**: Always 1 in every existing config, never overridden. Parallel environments would speed up collection but are unused. If needed in the future, add as a per-dataset override in `collection:`.
 
 ---
 
@@ -639,36 +723,37 @@ These are consumed by CertiQ-Net's `env_loader.py` and removed from the config d
 ## Section 3: Parameter Dependency Graph
 
 ```
-Registry YAML
+datasets.yaml
 │
-├── name ────────────────────── independent
-├── env ─────────────────────── independent (points to env YAML)
-├── env_N ───────────────────── DERIVED from len(h) in env YAML  ⚠️ REDUNDANT
-├── env_mu_fixed ────────────── DERIVED from (network × mu).sum(axis=0)  ⚠️ REDUNDANT
-├── env_lam ─────────────────── DERIVED from sum(lam)  ⚠️ REDUNDANT
-├── output_dir ──────────────── independent
+├── defaults: ──────── shared, deep-merged into every dataset entry
 │
-├── collection
-│   ├── n_steps ─────────────── independent
-│   ├── n_valid ─────────────── independent
-│   ├── n_test ──────────────── independent
-│   ├── shard_size ──────────── independent
-│   ├── batch_size_env ──────── independent (always 1)  ⚠️ EFFECTIVELY UNUSED
-│   ├── seed ────────────────── independent
-│   ├── policy ──────────────── independent
-│   └── policy_weights ──────── required only when policy="mixed"
-│
-└── training_defaults
-    ├── mode ────────────────── independent ("static" or "online")
-    ├── batch_size ──────────── independent
-    ├── n_samples ───────────── independent
-    ├── max_queue ───────────── independent (fallback only)
-    ├── resample_every_epoch ── independent
-    ├── policy_buffer_max ───── independent
-    ├── teacher_mix_fraction ── independent
-    ├── policy_mix_fraction ─── independent
-    ├── hard_state_fraction ─── independent
-    └── adversarial_fraction ── independent
+└── datasets.<name>:
+    ├── env ──────────────────── independent (points to env YAML)
+    ├── env_N ────────────────── DERIVED from len(h) or .npy dims (cached)
+    ├── env_mu_fixed ─────────── DERIVED from (network × mu).sum(axis=0) (cached)
+    ├── env_lam ──────────────── DERIVED from sum(lam) (cached)
+    ├── output_dir ───────────── independent
+    │
+    ├── collection
+    │   ├── n_steps ──────────── independent
+    │   ├── n_valid ──────────── independent
+    │   ├── n_test ───────────── independent
+    │   ├── shard_size ───────── independent
+    │   ├── seed ─────────────── independent
+    │   ├── policy ───────────── independent
+    │   └── policy_weights ───── required only when policy="mixed"
+    │
+    └── training_defaults
+        ├── mode ─────────────── independent ("static" or "online")
+        ├── batch_size ───────── independent
+        ├── n_samples ────────── independent
+        ├── max_queue ────────── independent (fallback only)
+        ├── resample_every_epoch ─ independent
+        ├── policy_buffer_max ── independent
+        ├── teacher_mix_fraction ─ independent
+        ├── policy_mix_fraction ── independent
+        ├── hard_state_fraction ── independent
+        └── adversarial_fraction ─ independent
 ```
 
 ### Env YAML → QGym flow:
@@ -694,52 +779,60 @@ Env YAML ──► QGymEnvConfig.from_yaml() ──► dataclasses.asdict()
 
 ---
 
-## Section 4: Complete Minimal Registry YAML Template
-
-Removing all redundant/informational parameters (`env_N`, `env_mu_fixed`, `env_lam`):
+## Section 4: Minimal Multi-Dataset Template
 
 ```yaml
-# configs/dataset/qgym/registry/<dataset_name>.yaml
+# configs/dataset/qgym/registry/datasets.yaml
 
-name: <dataset_name>                  # Required. Unique registry key.
-env: extern/QGym/configs/env/<name>.yaml  # Required. Path to env YAML.
-output_dir: final_dataset/qgym        # Optional. Default: final_dataset/qgym
+defaults:
+  output_dir: final_dataset/qgym
 
-collection:
-  n_steps: 500000                     # Required. Training states count.
-  n_valid: 10000                      # Required. Validation states count.
-  n_test: 10000                       # Required. Test states count.
-  shard_size: 50000                   # Required. States per .pt file.
-  seed: 42                            # Required. Random seed.
-  policy: mixed                       # Required. One of: random, sed, qmd, softmax, mixed
-  policy_weights:                     # Required only when policy=mixed.
-    random: 0.25
-    sed: 0.25
-    qmd: 0.25
-    softmax: 0.25
+  collection:
+    n_steps: 500000
+    n_valid: 10000
+    n_test: 10000
+    shard_size: 50000
+    policy: mixed
+    policy_weights:
+      random: 0.25
+      sed: 0.25
+      qmd: 0.25
+      softmax: 0.25
 
-training_defaults:
-  mode: static                        # Optional. Default: static
-  batch_size: 64                      # Optional. Default: 64
-  n_samples: 512                      # Optional. Default: 512
-  max_queue: 15                       # Optional. Default: 15
-  resample_every_epoch: true          # Optional. Default: true
-  policy_buffer_max: 4096             # Optional. Default: 4096
-  teacher_mix_fraction: 0.25          # Optional. Default: 0.25
-  policy_mix_fraction: 0.25           # Optional. Default: 0.25
-  hard_state_fraction: 0.75           # Optional. Default: 0.5
-  adversarial_fraction: 0.25          # Optional. Default: 0.25
+  training_defaults:
+    mode: static
+    batch_size: 64
+    n_samples: 512
+    max_queue: 15
+    resample_every_epoch: true
+    policy_buffer_max: 4096
+    teacher_mix_fraction: 0.25
+    policy_mix_fraction: 0.25
+    hard_state_fraction: 0.75
+    adversarial_fraction: 0.25
+
+datasets:
+
+  my_topology: &my_topo
+    env: extern/QGym/configs/env/my_topology.yaml
+    env_N: 6
+    env_mu_fixed: [0.5, 0.3, 0.2]
+    env_lam: 0.15
+
+  my_topology_debug:
+    <<: *my_topo
+    collection: {n_steps: 10000, n_valid: 1000, n_test: 1000, shard_size: 5000}
+    training_defaults: {n_samples: 256}
 ```
 
 ---
 
-## Section 5: Redundant & Sloppy Parameters — Summary
+## Section 5: Removed Legacy Parameters
 
-| Parameter | Problem | Replacement / Source of Truth |
-|-----------|---------|------------------------------|
-| `env_N` | Pure metadata, never consumed | `len(h)` from env YAML |
-| `env_mu_fixed` | Pure metadata, never consumed | `(network × mu).sum(axis=0)` from .npy |
-| `env_lam` | Pure metadata, never consumed | `sum(lam_vector)` from .npy |
-| `batch_size_env` | Always 1 in practice | Remove or hardcode; parallel envs are unused |
+The following parameters existed in the old per-file YAML format and have been **removed** from the new single-file design:
 
-These four parameters carry **zero functional weight**. They exist either as documentation shortcuts or as artifacts from an earlier design iteration. Removing them from the YAML would change nothing about collection or training behavior.
+| Parameter | Reason | Notes |
+|-----------|--------|-------|
+| `batch_size_env` | Always 1; never overridden in any dataset | Hardcoded in `CollectionConfig(batch_size_env=1)` |
+
+The derivation fields `env_N`, `env_mu_fixed`, `env_lam` are **retained** as optional topology-anchor convenience fields — they serve as fast-path caches consumed by `train/runner.py`, `eval/audit.py`, `eval/baselines.py`, and `experiments/runner/engine.py`. When omitted, those consumers compute the values from the env config at runtime.

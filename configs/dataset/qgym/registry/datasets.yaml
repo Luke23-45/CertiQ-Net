@@ -1,0 +1,78 @@
+# Centralised QGym dataset registry — single source of truth for all
+# pre-collected datasets.  The ``defaults`` section sets shared parameters
+# inherited by every dataset via Python-side deep merge.  Each entry
+# under ``datasets`` only needs to specify what differs from the defaults.
+#
+# Adding a new topology:
+#   1. Create a YAML anchor: ``new_topology: &nt`` with ``env``, ``env_N``
+#      and optionally ``env_mu_fixed`` / ``env_lam``.
+#   2. Create a production entry with that anchor (no collection override
+#      needed — uses defaults).
+#   3. Create a debug entry with ``<<: *nt`` and debug-specific overrides.
+#
+# Adding a new variant of an existing topology:
+#   Use ``<<: <existing_anchor>`` and override only what differs.
+
+defaults:
+  output_dir: final_dataset/qgym
+
+  collection:
+    n_steps: 500000
+    n_valid: 10000
+    n_test: 10000
+    shard_size: 50000
+    seed: 42
+    policy: mixed
+    policy_weights:
+      random: 0.25
+      sed: 0.25
+      qmd: 0.25
+      softmax: 0.25
+
+  training_defaults:
+    mode: static
+    batch_size: 64
+    n_samples: 512
+    max_queue: 15
+    resample_every_epoch: true
+    policy_buffer_max: 4096
+    teacher_mix_fraction: 0.25
+    policy_mix_fraction: 0.25
+    hard_state_fraction: 0.75
+    adversarial_fraction: 0.25
+
+datasets:
+
+  # ── reentrant_2 (6 queues, 2 servers, reentrant ﬂow) ────────────
+  reentrant_2: &re2
+    env: extern/QGym/configs/env/reentrant_2.yaml
+    env_N: 6
+    env_mu_fixed: [0.125, 0.5, 0.25, 0.16666667, 0.14285715, 1.0]
+    env_lam: 0.128575
+
+  reentrant_2_debug:
+    <<: *re2
+    collection: {n_steps: 10000, n_valid: 1000, n_test: 1000, shard_size: 5000}
+    training_defaults: {n_samples: 256}
+
+  # ── reentrant_3_hyper (9 queues, 3 servers, hyperexponential) ──
+  reentrant_3_hyper: &re3h
+    env: extern/QGym/configs/env/reentrant_3_hyper.yaml
+    env_N: 9
+    env_lam: 0.128578
+
+  reentrant_3_hyper_debug:
+    <<: *re3h
+    collection: {n_steps: 10000, n_valid: 1000, n_test: 1000, shard_size: 5000}
+    training_defaults: {n_samples: 256}
+
+  # ── re-reentrant_3_hyper (9 queues, 3 servers, double reentrant) ─
+  re-reentrant_3_hyper: &rre3h
+    env: extern/QGym/configs/env/re-reentrant_3_hyper.yaml
+    env_N: 9
+    env_lam: 0.064294
+
+  re-reentrant_3_hyper_debug:
+    <<: *rre3h
+    collection: {n_steps: 10000, n_valid: 1000, n_test: 1000, shard_size: 5000}
+    training_defaults: {n_samples: 256}

@@ -32,6 +32,23 @@ log = logging.getLogger(__name__)
 
 _SUPPORTED_POLICIES = frozenset({"random", "sed", "qmd", "softmax", "mixed"})
 
+
+def _deep_merge(base: dict, overrides: dict) -> dict:
+    """Recursively deep-merge ``overrides`` into ``base``.
+
+    Both *base* and *overrides* are left unchanged (pure function).
+    Non-dict leaf values in *overrides* replace the corresponding value
+    in *base*.  Dict values are merged recursively.
+    """
+    result = dict(base)
+    for key, value in overrides.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 # ---------------------------------------------------------------------------
 #  Canonical paths
 # ---------------------------------------------------------------------------
@@ -61,7 +78,7 @@ def _canonicalise_for_hash(value: object) -> object:
 
 def dataset_spec_hash(spec: "DatasetSpec") -> str:
     """Return a stable fingerprint for a dataset spec."""
-    payload = _canonicalise_for_hash(DatasetRegistry().spec_to_dict(spec))
+    payload = _canonicalise_for_hash(DatasetRegistry.spec_to_dict(spec))
     data = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
     return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
@@ -171,8 +188,9 @@ class CollectionConfig:
 class DatasetSpec:
     """Complete specification for a single QGym dataset.
 
-    This is the **single source of truth** — one YAML file per dataset
-    defines both how to collect it and how to consume it during training.
+    The authoritative source of truth for this dataset's collection
+    parameters and training defaults.  Stored in ``datasets.yaml``
+    (multi-dataset format) or, for legacy support, in its own YAML file.
 
     Attributes
     ----------
@@ -201,6 +219,54 @@ class DatasetSpec:
 
 
 # ---------------------------------------------------------------------------
+#  Parsing helpers
+# ---------------------------------------------------------------------------
+
+
+def _parse_single_spec(raw: dict, source: str | Path) -> DatasetSpec:
+    """Parse a raw *flat* dict (all keys at top level) into a ``DatasetSpec``."""
+    name = raw.get("name")
+    if not name:
+        raise ValueError(f"Missing 'name' in dataset spec from {source}.")
+
+    collection_raw = raw.get("collection") or {}
+    collection = CollectionConfig(
+        n_steps=int(collection_raw.get("n_steps", 500_000)),
+        n_valid=int(collection_raw.get("n_valid", 10_000)),
+        n_test=int(collection_raw.get("n_test", 10_000)),
+        shard_size=int(collection_raw.get("shard_size", 50_000)),
+        seed=int(collection_raw.get("seed", 42)),
+        policy=collection_raw.get("policy", "mixed"),
+        policy_weights=collection_raw.get(
+            "policy_weights",
+            {"random": 0.25, "sed": 0.25, "qmd": 0.25, "softmax": 0.25},
+        ),
+    )
+
+    env_N_raw = raw.get("env_N")
+    env_N = int(env_N_raw) if env_N_raw is not None else None
+
+    env_mu_fixed_raw = raw.get("env_mu_fixed")
+    env_mu_fixed = (
+        [float(v) for v in env_mu_fixed_raw] if env_mu_fixed_raw else None
+    )
+
+    env_lam_raw = raw.get("env_lam")
+    env_lam = float(env_lam_raw) if env_lam_raw is not None else None
+
+    return DatasetSpec(
+        name=str(name),
+        env=str(raw.get("env", "")),
+        env_N=env_N,
+        env_mu_fixed=env_mu_fixed,
+        env_lam=env_lam,
+        output_dir=str(raw.get("output_dir", "final_dataset/qgym")),
+        collection=collection,
+        training_defaults=raw.get("training_defaults") or {},
+    )
+
+
+# ---------------------------------------------------------------------------
 #  Registry
 # ---------------------------------------------------------------------------
 
@@ -209,8 +275,11 @@ class DatasetRegistry:
     """Manages known QGym datasets: discovery, loading, existence checks.
 
     The registry scans ``configs/dataset/qgym/registry/*.yaml`` to discover
-    all datasets that the project knows about.  Each YAML file is expected
-    to conform to the ``DatasetSpec`` schema.
+    all datasets.  Each YAML file may contain either:
+
+    - A **multi-dataset** file with ``defaults`` and ``datasets`` sections
+      (preferred — see ``datasets.yaml``).
+    - A **legacy** single-dataset file with a top-level ``name`` key.
     """
 
     def __init__(
@@ -225,7 +294,14 @@ class DatasetRegistry:
     # ── Discovery ─────────────────────────────────────────────────────
 
     def _load_all(self) -> dict[str, DatasetSpec]:
-        """Load and index all registry YAML files."""
+        """Load and index all registry YAML files.
+
+        Supports two YAML formats:
+        1. **Multi-dataset** (preferred) — a single file with ``defaults``
+           and ``datasets`` sections.
+        2. **Legacy** — one ``DatasetSpec`` per YAML file, with a ``name``
+           top-level key.
+        """
         specs: dict[str, DatasetSpec] = {}
         if not self._registry_dir.exists():
             log.warning("Registry directory not found: %s", self._registry_dir)
@@ -233,63 +309,70 @@ class DatasetRegistry:
 
         for yaml_path in sorted(self._registry_dir.glob("*.yaml")):
             try:
-                spec = self._parse_yaml(yaml_path)
-                if spec.name in specs:
-                    log.warning(
-                        "Duplicate dataset name '%s' in %s — overwriting.",
-                        spec.name,
-                        yaml_path,
-                    )
-                specs[spec.name] = spec
+                parsed = self._parse_yaml(yaml_path)
+                for name, spec in parsed.items():
+                    if name in specs:
+                        log.warning(
+                            "Duplicate dataset name '%s' in %s — overwriting.",
+                            name,
+                            yaml_path,
+                        )
+                    specs[name] = spec
             except Exception as exc:
                 log.warning("Failed to load registry YAML %s: %s", yaml_path, exc)
         return specs
 
     @staticmethod
-    def _parse_yaml(path: Path) -> DatasetSpec:
-        """Parse a single registry YAML into a ``DatasetSpec``."""
+    def _parse_yaml(path: Path) -> dict[str, DatasetSpec]:
+        """Parse a registry YAML into one or more ``DatasetSpec`` objects.
+
+        Format detection
+        ----------------
+        - If the YAML has a top-level ``datasets`` key  → multi-dataset format.
+          The ``defaults`` key (optional) provides shared parameters that are
+          deep-merged into every entry under ``datasets``.
+        - Otherwise → legacy single-dataset format with a top-level ``name`` key.
+        """
         with open(path) as f:
             raw = yaml.safe_load(f)
         if not isinstance(raw, dict):
             raise ValueError(f"Empty or invalid YAML: {path}")
 
-        name = raw.get("name")
-        if not name:
-            raise ValueError(f"Registry YAML {path} is missing 'name'.")
+        # ── Multi-dataset format ────────────────────────────────────────
+        if "datasets" in raw:
+            defaults = raw.get("defaults", {})
+            datasets_raw = raw.get("datasets", {})
+            if not isinstance(datasets_raw, dict):
+                raise ValueError(
+                    f"Registry YAML {path}: 'datasets' must be a mapping."
+                )
 
-        collection_raw = raw.get("collection", {})
-        collection = CollectionConfig(
-            n_steps=int(collection_raw.get("n_steps", 500_000)),
-            n_valid=int(collection_raw.get("n_valid", 10_000)),
-            n_test=int(collection_raw.get("n_test", 10_000)),
-            shard_size=int(collection_raw.get("shard_size", 50_000)),
-            batch_size_env=int(collection_raw.get("batch_size_env", 1)),
-            seed=int(collection_raw.get("seed", 42)),
-            policy=collection_raw.get("policy", "mixed"),
-            policy_weights=collection_raw.get(
-                "policy_weights",
-                {"random": 0.25, "sed": 0.25, "qmd": 0.25, "softmax": 0.25},
-            ),
-        )
+            results: dict[str, DatasetSpec] = {}
+            for ds_name, overrides in datasets_raw.items():
+                if not isinstance(overrides, dict):
+                    log.warning(
+                        "Dataset '%s' in %s must be a mapping — skipping.",
+                        ds_name, path,
+                    )
+                    continue
+                try:
+                    merged = _deep_merge(dict(defaults), overrides)
+                    merged["name"] = ds_name
+                    spec = _parse_single_spec(merged, path)
+                    results[spec.name] = spec
+                except Exception as exc:
+                    log.warning(
+                        "Failed to parse dataset '%s' in %s: %s — skipping.",
+                        ds_name, path, exc,
+                    )
+            return results
 
-        env_N_raw = raw.get("env_N")
-        env_N = int(env_N_raw) if env_N_raw is not None else None
+        # ── Legacy single-dataset format ────────────────────────────────
+        if "name" in raw:
+            return {str(raw["name"]): _parse_single_spec(raw, path)}
 
-        env_mu_fixed_raw = raw.get("env_mu_fixed")
-        env_mu_fixed = [float(v) for v in env_mu_fixed_raw] if env_mu_fixed_raw else None
-
-        env_lam_raw = raw.get("env_lam")
-        env_lam = float(env_lam_raw) if env_lam_raw is not None else None
-
-        return DatasetSpec(
-            name=str(name),
-            env=str(raw.get("env", "")),
-            env_N=env_N,
-            env_mu_fixed=env_mu_fixed,
-            env_lam=env_lam,
-            output_dir=str(raw.get("output_dir", "final_dataset/qgym")),
-            collection=collection,
-            training_defaults=raw.get("training_defaults", {}),
+        raise ValueError(
+            f"Registry YAML {path}: must contain 'datasets' or 'name' key."
         )
 
     # ── Public API ────────────────────────────────────────────────────
@@ -400,7 +483,8 @@ class DatasetRegistry:
                 result[n] = {"exists": False, "error": f"Unknown dataset '{n}'"}
         return result
 
-    def spec_to_dict(self, spec: DatasetSpec) -> dict:
+    @staticmethod
+    def spec_to_dict(spec: DatasetSpec) -> dict:
         """Convert a ``DatasetSpec`` to a plain dict for serialisation."""
         return {
             "name": spec.name,
