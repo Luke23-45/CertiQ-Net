@@ -290,7 +290,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
                 mode="online",
                 policy=spec.collection.policy,
                 policy_weights=spec.collection.policy_weights,
-                batch_size_env=1,
+                batch_size_env=spec.collection.batch_size_env,
                 seed=spec.collection.seed,
                 device="cpu",
             )

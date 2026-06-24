@@ -22,6 +22,9 @@ log = logging.getLogger(__name__)
 
 # Keys that every valid shard must contain.
 _REQUIRED_SHARD_KEYS = frozenset({"Q", "cost"})
+_OPTIONAL_1D_KEYS = frozenset({"reward", "event_time", "state_time"})
+_OPTIONAL_2D_KEYS = frozenset({"prev_Q"})
+_OPTIONAL_3D_KEYS = frozenset({"action"})
 
 
 class QGymDataset(Dataset):
@@ -113,6 +116,43 @@ class QGymDataset(Dataset):
                 f"Shard {path.name}: Q and cost have different batch sizes "
                 f"({data['Q'].shape[0]} vs {data['cost'].shape[0]})."
             )
+        batch_size = data["Q"].shape[0]
+        for key in _OPTIONAL_1D_KEYS:
+            if key in data:
+                if data[key].dim() != 1:
+                    raise ValueError(
+                        f"Shard {path.name}: '{key}' must be 1-D, got "
+                        f"shape {tuple(data[key].shape)}."
+                    )
+                if data[key].shape[0] != batch_size:
+                    raise ValueError(
+                        f"Shard {path.name}: '{key}' batch size "
+                        f"{data[key].shape[0]} != {batch_size}."
+                    )
+        for key in _OPTIONAL_2D_KEYS:
+            if key in data:
+                if data[key].dim() != 2:
+                    raise ValueError(
+                        f"Shard {path.name}: '{key}' must be 2-D, got "
+                        f"shape {tuple(data[key].shape)}."
+                    )
+                if data[key].shape != data["Q"].shape:
+                    raise ValueError(
+                        f"Shard {path.name}: '{key}' must match Q shape "
+                        f"{tuple(data['Q'].shape)}, got {tuple(data[key].shape)}."
+                    )
+        for key in _OPTIONAL_3D_KEYS:
+            if key in data:
+                if data[key].dim() != 3:
+                    raise ValueError(
+                        f"Shard {path.name}: '{key}' must be 3-D, got "
+                        f"shape {tuple(data[key].shape)}."
+                    )
+                if data[key].shape[0] != batch_size:
+                    raise ValueError(
+                        f"Shard {path.name}: '{key}' batch size "
+                        f"{data[key].shape[0]} != {batch_size}."
+                    )
 
     # ── Dataset interface ─────────────────────────────────────────────
 

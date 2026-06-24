@@ -19,6 +19,8 @@ Usage
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +44,56 @@ _REGISTRY_DIR = PROJECT_ROOT / "configs" / "dataset" / "qgym" / "registry"
 
 _DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "final_dataset" / "qgym"
 """Canonical root for all collected QGym datasets."""
+
+
+def _canonicalise_for_hash(value: object) -> object:
+    """Normalise nested data into a JSON-serialisable structure."""
+    if dataclasses.is_dataclass(value):
+        return _canonicalise_for_hash(dataclasses.asdict(value))
+    if isinstance(value, dict):
+        return {str(k): _canonicalise_for_hash(v) for k, v in sorted(value.items())}
+    if isinstance(value, (list, tuple)):
+        return [_canonicalise_for_hash(v) for v in value]
+    if isinstance(value, Path):
+        return str(value)
+    return value
+
+
+def dataset_spec_hash(spec: "DatasetSpec") -> str:
+    """Return a stable fingerprint for a dataset spec."""
+    payload = _canonicalise_for_hash(DatasetRegistry().spec_to_dict(spec))
+    data = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
+def _metadata_matches_spec(meta: dict, spec: "DatasetSpec") -> bool | None:
+    """Check whether stored metadata still matches the registry spec."""
+    stored_hash = meta.get("spec_hash")
+    if stored_hash:
+        return stored_hash == dataset_spec_hash(spec)
+
+    env_path = Path(spec.env)
+    if env_path.is_absolute():
+        expected_env = str(env_path.resolve())
+    else:
+        project_env = (PROJECT_ROOT / env_path).resolve()
+        expected_env = str(project_env if project_env.exists() else env_path)
+
+    checks: list[bool] = []
+    for key, expected in (
+        ("n_train", spec.collection.n_steps),
+        ("n_valid", spec.collection.n_valid),
+        ("n_test", spec.collection.n_test),
+        ("seed", spec.collection.seed),
+        ("policy", spec.collection.policy),
+        ("env_config", expected_env),
+    ):
+        if key in meta:
+            checks.append(meta.get(key) == expected)
+
+    if not checks:
+        return None
+    return all(checks)
 
 # ---------------------------------------------------------------------------
 #  Data classes
@@ -75,6 +127,7 @@ class CollectionConfig:
     n_valid: int = 10_000
     n_test: int = 10_000
     shard_size: int = 50_000
+    batch_size_env: int = 1
     seed: int = 42
     policy: Literal["random", "sed", "qmd", "softmax", "mixed"] = "mixed"
     policy_weights: dict[str, float] = field(
@@ -87,6 +140,10 @@ class CollectionConfig:
     )
 
     def __post_init__(self) -> None:
+        if self.batch_size_env <= 0:
+            raise ValueError(
+                f"batch_size_env must be positive, got {self.batch_size_env}"
+            )
         if self.policy not in _SUPPORTED_POLICIES:
             raise ValueError(
                 f"Unknown policy '{self.policy}'. "
@@ -206,6 +263,7 @@ class DatasetRegistry:
             n_valid=int(collection_raw.get("n_valid", 10_000)),
             n_test=int(collection_raw.get("n_test", 10_000)),
             shard_size=int(collection_raw.get("shard_size", 50_000)),
+            batch_size_env=int(collection_raw.get("batch_size_env", 1)),
             seed=int(collection_raw.get("seed", 42)),
             policy=collection_raw.get("policy", "mixed"),
             policy_weights=collection_raw.get(
@@ -292,6 +350,16 @@ class DatasetRegistry:
                 return False
             if not any(split_dir.glob("*.pt")):
                 return False
+        meta_path = path / "metadata.yaml"
+        if meta_path.exists():
+            try:
+                with open(meta_path) as f:
+                    meta = yaml.safe_load(f) or {}
+                matches = _metadata_matches_spec(meta, self.get(name))
+                if matches is False:
+                    return False
+            except Exception:
+                return False
         return True
 
     def status(self, name: str | None = None) -> dict[str, dict]:
@@ -324,6 +392,9 @@ class DatasetRegistry:
                         with open(meta_path) as f:
                             meta = yaml.safe_load(f) or {}
                         info["metadata"] = meta
+                        matches = _metadata_matches_spec(meta, self.get(n))
+                        if matches is not None:
+                            info["spec_matches_registry"] = matches
                 result[n] = info
             except KeyError:
                 result[n] = {"exists": False, "error": f"Unknown dataset '{n}'"}

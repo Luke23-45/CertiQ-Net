@@ -251,6 +251,15 @@ class QGymAdapter(DispatchAdapter):
             device=self._device,
         )
 
+    @staticmethod
+    def _tensor_like(value: object) -> Tensor | None:
+        """Convert a QGym value to a detached CPU tensor when possible."""
+        if value is None:
+            return None
+        if torch.is_tensor(value):
+            return value.detach().cpu().float()
+        return torch.as_tensor(value, dtype=torch.float).detach().cpu()
+
     # ── Policy resolution ─────────────────────────────────────────────
 
     def _extract_topology(self) -> tuple[np.ndarray, np.ndarray, int, int]:
@@ -325,6 +334,51 @@ class QGymAdapter(DispatchAdapter):
 
             with open(meta_path) as f:
                 self._metadata = yaml.safe_load(f) or {}
+
+    @property
+    def env_network(self) -> Tensor | None:
+        """Resolved server-queue connectivity matrix, if available."""
+        raw: Tensor | None
+        if self._env is None:
+            if isinstance(self._env_config, QGymEnvConfig):
+                raw = self._tensor_like(self._env_config.network)
+            elif isinstance(self._env_config, dict):
+                raw = self._tensor_like(self._env_config.get("network"))
+            else:
+                raw = None
+        else:
+            raw = self._tensor_like(getattr(self._env, "network", None))
+        if raw is not None and raw.dim() >= 3:
+            return raw[0]
+        return raw
+
+    @property
+    def env_mu_matrix(self) -> Tensor | None:
+        """Resolved service-rate matrix, if available."""
+        raw: Tensor | None
+        if self._env is None:
+            if isinstance(self._env_config, QGymEnvConfig):
+                raw = self._tensor_like(self._env_config.mu)
+            elif isinstance(self._env_config, dict):
+                raw = self._tensor_like(self._env_config.get("mu"))
+            else:
+                raw = None
+        else:
+            raw = self._tensor_like(getattr(self._env, "mu", None))
+        if raw is not None and raw.dim() >= 3:
+            return raw[0]
+        return raw
+
+    @property
+    def env_queue_event_options(self) -> Tensor | None:
+        """Resolved queue-event delta tensor, if available."""
+        if self._env is None:
+            if isinstance(self._env_config, QGymEnvConfig):
+                return self._tensor_like(self._env_config.queue_event_options)
+            if isinstance(self._env_config, dict):
+                return self._tensor_like(self._env_config.get("queue_event_options"))
+            return None
+        return self._tensor_like(getattr(self._env, "queue_event_options", None))
 
     def _load_next_shard(self) -> None:
         """Load the next dataset shard into memory (wraps at end)."""
@@ -467,7 +521,12 @@ class QGymAdapter(DispatchAdapter):
             np.random.seed(int(seed % (2**32)))
 
         Q_list: list[Tensor] = []
+        prev_Q_list: list[Tensor] = []
         cost_list: list[Tensor] = []
+        reward_list: list[Tensor] = []
+        event_time_list: list[Tensor] = []
+        action_list: list[Tensor] = []
+        state_time_list: list[Tensor] = []
 
         pbar = tqdm(
             total=n_samples,
@@ -478,30 +537,105 @@ class QGymAdapter(DispatchAdapter):
             mininterval=0.2,
             dynamic_ncols=True,
         )
+
+        def _as_batch_tensor(value: object) -> Tensor:
+            tensor = torch.as_tensor(value, dtype=torch.float)
+            if tensor.dim() == 0:
+                return tensor.unsqueeze(0)
+            return tensor
+
+        def _as_obs_batch(value: object) -> Tensor:
+            tensor = torch.as_tensor(value, dtype=torch.float)
+            if tensor.dim() == 1:
+                return tensor.unsqueeze(0)
+            return tensor
+
+        def _to_bool(value: object) -> bool:
+            if torch.is_tensor(value):
+                return bool(value.detach().cpu().any().item())
+            if isinstance(value, (list, tuple)):
+                return bool(torch.as_tensor(value).any().item())
+            return bool(value)
+
         try:
             obs, _ = env.reset()
-            obs = obs.flatten() if hasattr(obs, "flatten") else obs
+            obs_batch = _as_obs_batch(obs)
             collected = 0
             while collected < n_samples:
-                action = self._collect_policy(obs)
-                obs, reward, done, truncated, info = env.step(action)
-                obs = obs.flatten() if hasattr(obs, "flatten") else obs
-                Q_t = torch.tensor(obs, dtype=torch.float)
-                Q_list.append(Q_t)
-                cost_list.append(self._compute_cost(Q_t.unsqueeze(0)).squeeze(0))
-                collected += 1
-                pbar.update(1)
-                if done or truncated:
+                batch_now = obs_batch.shape[0]
+                prev_Q_batch = obs_batch.reshape(batch_now, -1)
+                action_rows = [
+                    torch.as_tensor(
+                        self._collect_policy(row.detach().cpu().numpy()),
+                        dtype=torch.float,
+                    )
+                    for row in prev_Q_batch
+                ]
+                action_batch = torch.stack(action_rows)
+                next_obs, reward, done, truncated, info = env.step(
+                    action_batch if self._batch_size_env > 1 else action_batch[0]
+                )
+                next_obs_batch = _as_obs_batch(next_obs)
+                reward_batch = _as_batch_tensor(reward).reshape(-1)
+                cost_batch = _as_batch_tensor(
+                    info.get("cost", -reward_batch)
+                ).reshape(-1)
+                event_time_batch = _as_batch_tensor(
+                    info.get("event_time", torch.zeros_like(cost_batch))
+                ).reshape(-1)
+                state = info.get("state")
+                state_time = getattr(state, "time", None)
+                state_time_batch = (
+                    _as_batch_tensor(state_time).reshape(-1)
+                    if state_time is not None
+                    else None
+                )
+
+                batch_take = min(n_samples - collected, next_obs_batch.shape[0])
+                for idx in range(batch_take):
+                    Q_list.append(next_obs_batch[idx].reshape(-1))
+                    prev_Q_list.append(prev_Q_batch[idx].reshape(-1))
+                    cost_list.append(cost_batch[idx].reshape(-1).squeeze())
+                    reward_list.append(reward_batch[idx].reshape(-1).squeeze())
+                    event_time_list.append(
+                        event_time_batch[idx].reshape(-1).squeeze()
+                    )
+                    action_list.append(action_batch[idx])
+                    if state_time_batch is not None and idx < state_time_batch.shape[0]:
+                        state_time_list.append(
+                            state_time_batch[idx].reshape(-1).squeeze()
+                        )
+                collected += batch_take
+                pbar.update(batch_take)
+                if _to_bool(done) or _to_bool(truncated):
                     obs, _ = env.reset()
-                    obs = obs.flatten() if hasattr(obs, "flatten") else obs
+                    obs_batch = _as_obs_batch(obs)
+                else:
+                    obs_batch = next_obs_batch
         finally:
             pbar.close()
 
         Q = torch.stack(Q_list)
+        prev_Q = torch.stack(prev_Q_list)
         cost_t = torch.stack(cost_list)
+        reward_t = torch.stack(reward_list)
+        event_time_t = torch.stack(event_time_list)
+        action_t = torch.stack(action_list)
+        state_time_t = torch.stack(state_time_list) if state_time_list else None
         mu_b = mu_effective.unsqueeze(0).expand(Q.shape[0], -1)
 
-        return AdapterBatch(Q=Q, mu=mu_b, xi=None, cost=cost_t)
+        return AdapterBatch(
+            Q=Q,
+            mu=mu_b,
+            xi=None,
+            cost=cost_t,
+            reward=reward_t,
+            event_time=event_time_t,
+            action=action_t,
+            prev_Q=prev_Q,
+            next_Q=Q.clone(),
+            state_time=state_time_t,
+        )
 
     def _sample_static(
         self,
@@ -544,7 +678,14 @@ class QGymAdapter(DispatchAdapter):
             # Fallback: uniform unit rates
             mu_b = torch.ones(n_samples, Q.shape[-1])
 
-        return AdapterBatch(Q=Q, mu=mu_b, xi=None, cost=cost)
+        return AdapterBatch(
+            Q=Q,
+            mu=mu_b,
+            xi=None,
+            cost=cost,
+            reward=-cost,
+            next_Q=Q.clone(),
+        )
 
     # ── Observation interface ─────────────────────────────────────────
 

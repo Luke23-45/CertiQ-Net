@@ -19,7 +19,12 @@ import yaml
 
 from certiqnet.adapters.qgym.adapter import QGymAdapter
 from certiqnet.adapters.qgym.config import resolve_env_config_path
-from certiqnet.data.registry import DatasetRegistry, DatasetSpec
+from certiqnet.data.registry import (
+    DatasetRegistry,
+    DatasetSpec,
+    _metadata_matches_spec,
+    dataset_spec_hash,
+)
 
 log = logging.getLogger(__name__)
 
@@ -75,7 +80,7 @@ class DatasetCollectionManager:
             mode="online",
             policy=spec.collection.policy,
             policy_weights=spec.collection.policy_weights,
-            batch_size_env=1,
+            batch_size_env=spec.collection.batch_size_env,
             seed=spec.collection.seed,
             device="cpu",
         )
@@ -110,7 +115,8 @@ class DatasetCollectionManager:
         # ── Check for existing data ───────────────────────────────────
         if output_dir.exists() and not force:
             already_complete = self._check_complete(output_dir)
-            if already_complete:
+            meta_matches = self._metadata_matches_current_spec(output_dir, spec)
+            if already_complete and meta_matches is not False:
                 log.info(
                     "Dataset '%s' already exists at %s and appears complete. "
                     "Use force=True to re-collect.",
@@ -119,7 +125,7 @@ class DatasetCollectionManager:
                 )
                 return output_dir
             log.warning(
-                "Dataset '%s' at %s is incomplete — re-collecting.",
+                "Dataset '%s' at %s is incomplete or stale — re-collecting.",
                 spec.name,
                 output_dir,
             )
@@ -162,11 +168,28 @@ class DatasetCollectionManager:
         cost_all = batch.cost.float()
         mu_vec = batch.mu[0].float()
         h_vec = adapter.env_h
+        reward_all = batch.reward.float() if batch.reward is not None else (-cost_all)
+        event_time_all = batch.event_time.float() if batch.event_time is not None else None
+        action_all = batch.action.float() if batch.action is not None else None
+        prev_Q_all = batch.prev_Q.float() if batch.prev_Q is not None else None
+        state_time_all = batch.state_time.float() if batch.state_time is not None else None
+        network_all = adapter.env_network
+        mu_matrix_all = adapter.env_mu_matrix
+        queue_event_options_all = adapter.env_queue_event_options
 
         # ── Shuffle & split ───────────────────────────────────────────
         perm = torch.randperm(total, generator=gen)
         Q_all = Q_all[perm]
         cost_all = cost_all[perm]
+        reward_all = reward_all[perm]
+        if event_time_all is not None:
+            event_time_all = event_time_all[perm]
+        if action_all is not None:
+            action_all = action_all[perm]
+        if prev_Q_all is not None:
+            prev_Q_all = prev_Q_all[perm]
+        if state_time_all is not None:
+            state_time_all = state_time_all[perm]
 
         splits = {
             "train": (0, spec.collection.n_steps),
@@ -191,6 +214,13 @@ class DatasetCollectionManager:
 
             Q_split = Q_all[lo:hi]
             cost_split = cost_all[lo:hi]
+            reward_split = reward_all[lo:hi]
+            event_time_split = event_time_all[lo:hi] if event_time_all is not None else None
+            action_split = action_all[lo:hi] if action_all is not None else None
+            prev_Q_split = prev_Q_all[lo:hi] if prev_Q_all is not None else None
+            state_time_split = (
+                state_time_all[lo:hi] if state_time_all is not None else None
+            )
             n = Q_split.shape[0]
             n_shards = max(1, math.ceil(n / spec.collection.shard_size))
 
@@ -201,7 +231,22 @@ class DatasetCollectionManager:
                     "Q": Q_split[s_lo:s_hi],
                     "cost": cost_split[s_lo:s_hi],
                     "mu": mu_vec,
+                    "reward": reward_split[s_lo:s_hi],
                 }
+                if event_time_split is not None:
+                    shard_data["event_time"] = event_time_split[s_lo:s_hi]
+                if action_split is not None:
+                    shard_data["action"] = action_split[s_lo:s_hi]
+                if prev_Q_split is not None:
+                    shard_data["prev_Q"] = prev_Q_split[s_lo:s_hi]
+                if state_time_split is not None:
+                    shard_data["state_time"] = state_time_split[s_lo:s_hi]
+                if network_all is not None:
+                    shard_data["network"] = network_all
+                if mu_matrix_all is not None:
+                    shard_data["mu_matrix"] = mu_matrix_all
+                if queue_event_options_all is not None:
+                    shard_data["queue_event_options"] = queue_event_options_all
                 if h_vec is not None:
                     shard_data["h"] = h_vec
                 shard_path = split_dir / f"shard_{shard_i:04d}.pt"
@@ -223,6 +268,7 @@ class DatasetCollectionManager:
         metadata = {
             "dataset_name": spec.name,
             "env_config": str(resolve_env_config_path(str(spec.env))),
+            "spec_hash": dataset_spec_hash(spec),
             "n_train": n_train,
             "n_valid": spec.collection.n_valid,
             "n_test": spec.collection.n_test,
@@ -247,6 +293,26 @@ class DatasetCollectionManager:
             "min_Q": round(min_Q, 4),
             "max_Q": round(max_Q, 4),
             "mean_cost": round(mean_cost, 4),
+            "has_transition_data": bool(
+                batch.reward is not None
+                or batch.event_time is not None
+                or batch.action is not None
+                or batch.prev_Q is not None
+            ),
+            "data_fields": [
+                "Q",
+                "cost",
+                "mu",
+                "reward",
+                "event_time",
+                "action",
+                "prev_Q",
+                "state_time",
+                "network",
+                "mu_matrix",
+                "queue_event_options",
+                "h",
+            ],
         }
         meta_path = output_dir / "metadata.yaml"
         with open(meta_path, "w") as f:
@@ -256,6 +322,7 @@ class DatasetCollectionManager:
         # ── Save a copy of the input spec for reproducibility ─────────
         spec_path = output_dir / "dataset_spec.yaml"
         spec_dict = self._registry.spec_to_dict(spec)
+        spec_dict["spec_hash"] = dataset_spec_hash(spec)
         with open(spec_path, "w") as f:
             yaml.dump(spec_dict, f, default_flow_style=False, sort_keys=False)
         log.info("Dataset spec saved to %s", spec_path)
@@ -433,3 +500,16 @@ class DatasetCollectionManager:
             if not any(split_dir.glob("*.pt")):
                 return False
         return True
+
+    @staticmethod
+    def _metadata_matches_current_spec(
+        dataset_dir: Path,
+        spec: DatasetSpec,
+    ) -> bool | None:
+        """Check whether the on-disk metadata still matches *spec*."""
+        meta_path = dataset_dir / "metadata.yaml"
+        if not meta_path.exists():
+            return None
+        with open(meta_path) as f:
+            meta = yaml.safe_load(f) or {}
+        return _metadata_matches_spec(meta, spec)

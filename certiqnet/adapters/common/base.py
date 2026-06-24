@@ -27,6 +27,12 @@ class AdapterBatch:
     mu: Tensor
     xi: Tensor | None
     cost: Tensor
+    reward: Tensor | None = None
+    event_time: Tensor | None = None
+    action: Tensor | None = None
+    prev_Q: Tensor | None = None
+    next_Q: Tensor | None = None
+    state_time: Tensor | None = None
 
 
 class DispatchAdapter(ABC):

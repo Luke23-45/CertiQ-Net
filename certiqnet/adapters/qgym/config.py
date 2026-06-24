@@ -142,6 +142,8 @@ class QGymCollectionConfig:
         Number of test states.
     shard_size : int
         Maximum states per ``.pt`` shard file.
+    batch_size_env : int
+        Number of parallel QGym environments for online collection.
     seed : int
         Base random seed.
     force_collect : bool
@@ -160,6 +162,7 @@ class QGymCollectionConfig:
     n_valid: int = 10_000
     n_test: int = 10_000
     shard_size: int = 50_000
+    batch_size_env: int = 1
     seed: int = 42
     force_collect: bool = False
     policy: Literal["random", "sed", "qmd", "softmax", "mixed"] = "mixed"
@@ -183,6 +186,10 @@ class QGymCollectionConfig:
             raise ValueError(f"n_test must be non-negative, got {self.n_test}")
         if self.shard_size <= 0:
             raise ValueError(f"shard_size must be positive, got {self.shard_size}")
+        if self.batch_size_env <= 0:
+            raise ValueError(
+                f"batch_size_env must be positive, got {self.batch_size_env}"
+            )
         if self.policy not in SUPPORTED_POLICIES:
             raise ValueError(
                 f"Unknown policy '{self.policy}'. "
@@ -222,6 +229,7 @@ class QGymCollectionConfig:
             n_valid=collection_sec.get("n_valid", 10_000),
             n_test=collection_sec.get("n_test", 10_000),
             shard_size=collection_sec.get("shard_size", 50_000),
+            batch_size_env=collection_sec.get("batch_size_env", 1),
             seed=collection_sec.get("seed", 42),
             force_collect=collection_sec.get("force_collect", False),
             policy=collection_sec.get("policy", "mixed"),

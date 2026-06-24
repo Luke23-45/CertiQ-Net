@@ -31,7 +31,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from certiqnet.adapters.qgym.config import QGymEnvConfig, resolve_env_config_path
-from certiqnet.data.registry import DatasetRegistry
+from certiqnet.data.registry import DatasetRegistry, dataset_spec_hash
 
 # ---------------------------------------------------------------------------
 #  Thresholds
@@ -43,7 +43,20 @@ _BACKLOG_THRESHOLDS = [50, 100, 500, 1000, 2000, 5000]
 _SHARD_KEY_REQUIRED = frozenset({"Q", "cost"})
 """Keys every shard must have (matches QGymDataset._REQUIRED_SHARD_KEYS)."""
 
-_SHARD_KEY_OPTIONAL = frozenset({"mu", "h", "network", "mu_matrix", "env_config"})
+_SHARD_KEY_OPTIONAL = frozenset({
+    "mu",
+    "h",
+    "network",
+    "mu_matrix",
+    "queue_event_options",
+    "reward",
+    "event_time",
+    "action",
+    "prev_Q",
+    "state_time",
+    "env_config",
+    "spec_hash",
+})
 """Keys that may or may not be present."""
 
 # ---------------------------------------------------------------------------
@@ -600,6 +613,10 @@ def audit_dataset(name: str, verbose: bool = False) -> dict:
                     f"metadata.yaml mean_Q={meta_Q_mean} differs from actual "
                     f"train mean_Q={actual_mean}"
                 )
+        if meta.get("spec_hash") and meta["spec_hash"] != dataset_spec_hash(spec):
+            meta_check.warnings.append(
+                "metadata.yaml spec_hash does not match registry spec"
+            )
 
     if meta_check.warnings:
         all_warnings.extend(meta_check.warnings)
