@@ -30,4 +30,10 @@ experiment_family: main_queueing
 certificate_status: exact
 datatype: qgym
 
-
+# Backwards compatibility block for external scripts (e.g. Colab) 
+# that pass --set "studies.runner.baselines.include=[...]"
+studies:
+  runner:
+    baselines:
+      include: ["*"]
+      exclude: []
