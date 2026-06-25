@@ -3,7 +3,7 @@
 # configs/runner/default.yaml
 #
 # Parameters for the evaluation/sweep runner script.
-# Extracted from the root config.yaml where they had no Python backing.
+# This directly configures the RolloutConfig used in certiqnet/eval/baselines.py
 # ──────────────────────────────────────────────────────────────────────────────
 runner:
   rollout_steps: 1000       # number of environment steps per evaluation rollout

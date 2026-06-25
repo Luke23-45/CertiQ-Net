@@ -1,5 +1,4 @@
 # @package _global_
 model:
   _target_: certiqnet.models.baselines.MaxWeight
-  N: 10
-  beta: 1.0
+  N: ???
