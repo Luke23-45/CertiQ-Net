@@ -56,7 +56,7 @@ def _deep_merge(base: dict, overrides: dict) -> dict:
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 """Absolute path to the project root (CertiQ‑Net/)."""
 
-_REGISTRY_DIR = PROJECT_ROOT / "configs" / "dataset" / "qgym" / "registry"
+_REGISTRY_DIR = PROJECT_ROOT / "configs" / "dataset" / "qgym"
 """Directory containing centralized dataset YAML definitions."""
 
 _DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "final_dataset" / "qgym"
@@ -274,7 +274,7 @@ def _parse_single_spec(raw: dict, source: str | Path) -> DatasetSpec:
 class DatasetRegistry:
     """Manages known QGym datasets: discovery, loading, existence checks.
 
-    The registry scans ``configs/dataset/qgym/registry/*.yaml`` to discover
+    The registry scans ``configs/dataset/qgym/*.yaml`` to discover
     all datasets.  Each YAML file may contain either:
 
     - A **multi-dataset** file with ``defaults`` and ``datasets`` sections

@@ -14,7 +14,7 @@ defaults:
   - /runner: default
   - /studies/runner: default
   - _self_
-  - /datatype: qgym
+  - /dataset/qgym: qgym
 
 project:
   name: certiq-net-main-queueing-optimized

@@ -23,7 +23,7 @@ Usage
     python -m certiqnet.data.qgym.collect_qgym --config path/to/collection.yaml
 
 The primary workflow uses the **centralized dataset registry**
-(``configs/dataset/qgym/registry/*.yaml``) as the single source of truth.
+(``configs/dataset/qgym/*.yaml``) as the single source of truth.
 """
 
 from __future__ import annotations

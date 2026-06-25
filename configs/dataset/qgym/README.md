@@ -46,7 +46,7 @@ Registry YAML  (this file)
 
 | File | Location | Purpose |
 |------|----------|---------|
-| **Registry YAML** | `configs/dataset/qgym/registry/datasets.yaml` | All datasets: collection + training params |
+| **Registry YAML** | `configs/dataset/qgym/datasets.yaml` | All datasets: collection + training params |
 | **Env YAML** | `extern/QGym/configs/env/<name>.yaml` | Queueing topology (links to .npy data) |
 
 The `.npy` data files live in `extern/QGym/configs/env_data/<env_type>/`.
@@ -145,7 +145,7 @@ The file has three top-level keys:
 - `DatasetRegistry.get("reentrant_2")` — spec resolution
 - `DatasetRegistry.resolve_path("reentrant_2")` — `final_dataset/qgym/reentrant_2/`
 
-**Constraint**: Must be unique across all `registry/*.yaml` files. Duplicates silently overwrite.
+**Constraint**: Must be unique across all `*.yaml` files in the directory. Duplicates silently overwrite.
 
 ---
 
@@ -798,7 +798,7 @@ Env YAML ──► QGymEnvConfig.from_yaml() ──► dataclasses.asdict()
 ## Section 4: Minimal Multi-Dataset Template
 
 ```yaml
-# configs/dataset/qgym/registry/datasets.yaml
+# configs/dataset/qgym/datasets.yaml
 
 defaults:
   output_dir: final_dataset/qgym
