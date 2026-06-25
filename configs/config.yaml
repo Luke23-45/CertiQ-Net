@@ -12,6 +12,7 @@ defaults:
   - trainer: default
   - logger: csv
   - progress: default
+  - runner: default
   - _self_
 
 project:

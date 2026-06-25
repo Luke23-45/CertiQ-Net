@@ -7,7 +7,7 @@
 # Overrides trainer for PL Trainer and datatype profiles for training params.
 # ──────────────────────────────────────────────────────────────────────────────
 defaults:
-  - base
+  - default
   - _self_
 
 trainer:
