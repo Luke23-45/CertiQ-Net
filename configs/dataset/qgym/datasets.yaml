@@ -84,6 +84,7 @@ datasets:
   criss_cross_bh: &cc_bh
     env: extern/QGym/configs/env/criss_cross_bh.yaml
     env_N: 3
+    env_mu_fixed: [2.0, 1.0, 2.0]
     env_lam: 1.800001
 
   criss_cross_bh_debug:
@@ -95,6 +96,7 @@ datasets:
   input_switch: &is
     env: extern/QGym/configs/env/input_switch.yaml
     env_N: 6
+    env_mu_fixed: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     env_lam: 2.4
 
   input_switch_debug:
@@ -106,7 +108,8 @@ datasets:
   n_model_large: &nml
     env: extern/QGym/configs/env/n_model_large.yaml
     env_N: 5
-    env_lam: 3.0478
+    env_mu_fixed: [2.9137310252, 0.3780214019, 0.730689249, 0.1460986521, 2.5634375744]
+    env_lam: 3.047934
 
   n_model_large_debug:
     <<: *nml
@@ -117,7 +120,8 @@ datasets:
   n_model_giant: &nmg
     env: extern/QGym/configs/env/n_model_giant.yaml
     env_N: 5
-    env_lam: 3.0022
+    env_mu_fixed: [44.8165201154, 139.3218099202, 92.2443894653, 130.2952049297, 129.4426330643]
+    env_lam: 3.002452
 
   n_model_giant_debug:
     <<: *nmg
@@ -128,17 +132,21 @@ datasets:
   n_model_5x5: &nm5
     env: extern/QGym/configs/env/n_model_5x5.yaml
     env_N: 5
+    env_mu_fixed: [2.6, 1.0, 1.8, 1.8, 1.0]
     env_lam: 1.615
 
   n_model_5x5_debug:
     <<: *nm5
     collection: {n_steps: 10000, n_valid: 1000, n_test: 1000, shard_size: 5000}
 
-  # hospital: 9 queues, 13 server types, realistic clinical routing topology.
-  # High arrival rates, asymmetric flows — heuristics cannot handle well.
+  # hospital: 8 queues, 13 server types with pool sizes up to 50, realistic clinical routing topology.
+  # Note: init_queues in hospital.yaml has 9 entries (env file inconsistency) but network/mu matrices
+  # both have 8 columns — env_N=8 matches the authoritative matrix dimension.
+  # High arrival rates, asymmetric pool-weighted flows — heuristics cannot handle well.
   hospital: &hosp
     env: extern/QGym/configs/env/hospital.yaml
-    env_N: 9
+    env_N: 8
+    env_mu_fixed: [26.0, 26.1363636364, 50.5555555556, 13.8888888889, 20.0, 13.7297297297, 7.7777777778, 19.8]
     env_lam: 93.2
 
   hospital_debug:
