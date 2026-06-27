@@ -32,7 +32,6 @@ def generate_state_bank(
     n_adversarial: int = 200,
 ) -> Tensor:
     """Generate random, grid, boundary, balanced, tail, and adversarial-shaped states."""
-    del n_adversarial
     assert N >= 1, "N must be positive."
     assert (mu > 0).all(), "Service rates must be positive."
     states: list[Tensor] = [torch.randint(0, 100, (n_random, N)).float()]
@@ -56,6 +55,15 @@ def generate_state_bank(
         scale = (R_cert * 1.5 / S).clamp(min=1.0).unsqueeze(-1)
         Q_tail = (Q_tail * scale).ceil()
     states.append(Q_tail)
+
+    if n_adversarial > 0:
+        Q_adv = torch.randint(75, 150, (n_adversarial, N)).float()
+        if R_cert < float("inf"):
+            mu_adv = _expand_mu(mu, n_adversarial)
+            S_adv = tail_size(Q_adv, mu_adv, beta).clamp_min(1e-6)
+            scale_adv = (R_cert * 2.0 / S_adv).clamp(min=1.0).unsqueeze(-1)
+            Q_adv = (Q_adv * scale_adv).ceil()
+        states.append(Q_adv)
     return torch.cat(states, dim=0)
 
 

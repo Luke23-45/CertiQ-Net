@@ -47,7 +47,7 @@ if str(ROOT) not in sys.path:
 
 from certiqnet.adapters.qgym.config import QGymCollectionConfig
 from certiqnet.data.collection_manager import DatasetCollectionManager
-from certiqnet.data.registry import DatasetRegistry, dataset_spec_hash
+from certiqnet.data.registry import DatasetRegistry
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -119,25 +119,25 @@ def cmd_collect(args: argparse.Namespace) -> None:
             training_defaults=spec.training_defaults,
         )
     output = manager.collect(spec, force=args.force, skip_verify=args.no_verify)
-    if args.n_steps is not None and args.trust_override:
-        registry_spec = registry.get(name)
-        reg_hash = dataset_spec_hash(registry_spec)
+    if args.n_steps is not None:
         meta_path = Path(output) / "metadata.yaml"
         if meta_path.exists():
             with open(meta_path) as f:
                 meta = yaml.safe_load(f) or {}
-            meta["spec_hash"] = reg_hash
+            meta["collection_override"] = {"n_steps": args.n_steps}
+            meta["trust_override_requested"] = bool(args.trust_override)
             with open(meta_path, "w") as f:
                 yaml.dump(meta, f, default_flow_style=False, sort_keys=False)
-            print(f"[collect] metadata spec_hash rewritten to registry hash ({reg_hash[:12]}...)")
+            print(f"[collect] metadata annotated with collection override")
         spec_path = Path(output) / "dataset_spec.yaml"
         if spec_path.exists():
             with open(spec_path) as f:
                 spec_d = yaml.safe_load(f) or {}
-            spec_d["spec_hash"] = reg_hash
+            spec_d["collection_override"] = {"n_steps": args.n_steps}
+            spec_d["trust_override_requested"] = bool(args.trust_override)
             with open(spec_path, "w") as f:
                 yaml.dump(spec_d, f, default_flow_style=False, sort_keys=False)
-            print(f"[collect] dataset_spec spec_hash rewritten to registry hash")
+            print("[collect] dataset_spec annotated with collection override")
     print(f"\n[collect] done -> {output}")
 
 
@@ -258,8 +258,8 @@ def main() -> None:
     p_collect.add_argument(
         "--trust-override",
         action="store_true",
-        help="Store the registry spec hash (not the overridden hash) in metadata, "
-             "so the training pipeline treats this dataset as matching the registry.",
+        help="Deprecated compatibility flag. Collects the override but never "
+             "rewrites registry hashes; metadata is marked as a mismatch.",
     )
 
     # ── list ──────────────────────────────────────────────────────────

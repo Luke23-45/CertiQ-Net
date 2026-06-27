@@ -101,6 +101,7 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
             rollout=rollout,
             extra_models={"configured_model": model},
             adapter=adapter,
+            qgym_test_path=cfg.runner.get("qgym_test_path"),
             include=baseline_include,
             exclude=baseline_exclude,
         )

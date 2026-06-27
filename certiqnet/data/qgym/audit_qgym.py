@@ -645,6 +645,11 @@ def audit_dataset(name: str, verbose: bool = False) -> dict:
             meta_check.warnings.append(
                 "metadata.yaml spec_hash does not match registry spec"
             )
+        if meta.get("registry_status") and meta["registry_status"] != "match":
+            meta_check.warnings.append(
+                f"metadata.yaml registry_status={meta['registry_status']} "
+                "marks this dataset as non-registry data"
+            )
 
     if meta_check.warnings:
         all_warnings.extend(meta_check.warnings)

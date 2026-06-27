@@ -75,7 +75,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
         # ── Validation rollout ────────────────────────────────────────
-        val_horizon_max: int = 8,
+        val_horizon_max: int = 64,
     ) -> None:
         super().__init__()
         self.model = model
@@ -445,42 +445,69 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
     def validation_step(self, batch: dict[str, Tensor], batch_idx: int) -> None:
         del batch_idx
         Q, mu, xi = batch["Q"], batch["mu"], batch.get("xi")
-        if hasattr(self.model, "reset_dispatch_state"):
-            self.model.reset_dispatch_state()
-        env = CTMCEnvironment(N=int(Q.shape[-1]), lam=self.lam, mu=mu[0], B=Q.shape[0])
-        env.reset(Q.detach().clone())
-        policy_diagnostics: list[DispatcherDiagnostics] = []
-        queue_trace: list[Tensor] = []
-        cost_trace: list[Tensor] = []
-        dt_trace: list[Tensor] = []
-        val_horizon = max(4, min(self.rollout_horizon, self.val_horizon_max))
-        with torch.no_grad():
-            for _ in range(val_horizon):
-                Q_obs = env.Q.clone()
-                mu_obs = mu
-                xi_obs = xi
-                Q_obs, mu_obs, xi_obs = self._make_observation(Q_obs, mu_obs, xi_obs)
-                out = self.model.forward_full(Q_obs, mu_obs, xi_obs, training_mode=False)
-                action_idx = out.pi.argmax(dim=-1)
-                action_pi = F.one_hot(action_idx, num_classes=int(Q.shape[-1])).float()
-                step = env.step(action_pi)
-                policy_diagnostics.append(out.diagnostics)
-                queue_trace.append(step["Q"].detach())
-                cost_trace.append(step["cost"].detach())
-                dt_trace.append(step["dt"].detach())
-        diag = _stack_mean(policy_diagnostics)
-        backlog = torch.cat(queue_trace, dim=0).sum(dim=-1).float()
-        cost_t = torch.cat(cost_trace, dim=0).float()
-        dt_t = torch.cat(dt_trace, dim=0).float()
-        avg_cost = self.loss_fn.rollout_cost(cost_t, dt_t)
-        p95_backlog = backlog.quantile(0.95)
-        violation = (diag.constraint_violation.mean() > 1e-4).float()
+        val_horizon = max(self.rollout_horizon, self.val_horizon_max)
+
+        def _run_rollout(
+            init_Q: Tensor,
+            init_mu: Tensor,
+            init_xi: Tensor | None,
+            horizon: int,
+        ) -> tuple[DispatcherDiagnostics, Tensor, Tensor, Tensor]:
+            if hasattr(self.model, "reset_dispatch_state"):
+                self.model.reset_dispatch_state()
+            env = CTMCEnvironment(
+                N=int(init_Q.shape[-1]),
+                lam=self.lam,
+                mu=init_mu[0],
+                B=init_Q.shape[0],
+            )
+            env.reset(init_Q.detach().clone())
+            policy_diagnostics: list[DispatcherDiagnostics] = []
+            queue_trace: list[Tensor] = []
+            cost_trace: list[Tensor] = []
+            dt_trace: list[Tensor] = []
+            with torch.no_grad():
+                for _ in range(horizon):
+                    Q_obs = env.Q.clone()
+                    mu_obs = init_mu
+                    xi_obs = init_xi
+                    Q_obs, mu_obs, xi_obs = self._make_observation(Q_obs, mu_obs, xi_obs)
+                    out = self.model.forward_full(Q_obs, mu_obs, xi_obs, training_mode=False)
+                    action_idx = out.pi.argmax(dim=-1)
+                    action_pi = F.one_hot(action_idx, num_classes=int(init_Q.shape[-1])).float()
+                    step = env.step(action_pi)
+                    policy_diagnostics.append(out.diagnostics)
+                    queue_trace.append(step["Q"].detach())
+                    cost_trace.append(step["cost"].detach())
+                    dt_trace.append(step["dt"].detach())
+            diag = _stack_mean(policy_diagnostics)
+            backlog = torch.cat(queue_trace, dim=0).sum(dim=-1).float()
+            cost_t = torch.cat(cost_trace, dim=0).float()
+            dt_t = torch.cat(dt_trace, dim=0).float()
+            avg_cost = self.loss_fn.rollout_cost(cost_t, dt_t)
+            p95_backlog = backlog.quantile(0.95)
+            violation = (diag.constraint_violation.mean() > 1e-4).float()
+            return diag, avg_cost, p95_backlog, violation
+
+        zero_Q = torch.zeros_like(Q)
+        primary_diag, avg_cost, p95_backlog, violation = _run_rollout(
+            zero_Q, mu, xi, val_horizon
+        )
         selection_score = validation_selection_score(violation, avg_cost, p95_backlog)
         self.log("val/CONSTRAINT_VIOLATION", violation, prog_bar=True)
         self.log("val/avg_cost", avg_cost, prog_bar=True)
         self.log("val/p95_backlog", p95_backlog, prog_bar=False)
         self.log("val/selection_score", selection_score, prog_bar=False)
-        self._log_diagnostics(diag, "val")
+        self._log_diagnostics(primary_diag, "val")
+
+        if xi is not None or Q.abs().sum().item() > 0:
+            aux_diag, aux_avg_cost, aux_p95_backlog, aux_violation = _run_rollout(
+                Q, mu, xi, val_horizon
+            )
+            self.log("val/dataset_start_CONSTRAINT_VIOLATION", aux_violation, prog_bar=False)
+            self.log("val/dataset_start_avg_cost", aux_avg_cost, prog_bar=False)
+            self.log("val/dataset_start_p95_backlog", aux_p95_backlog, prog_bar=False)
+            self._log_diagnostics(aux_diag, "val_dataset_start")
 
     # ── Diagnostics logging ────────────────────────────────────────
 

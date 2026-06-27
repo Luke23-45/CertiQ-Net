@@ -59,6 +59,8 @@ class ExperimentMetrics:
     seed: int
     performance: PerformanceMetrics
     certificate: CertificateMetrics
+    evaluation_start: str = "zero"
+    greedy_eval: bool = False
 
     def flat(self) -> dict[str, float | int | str]:
         """Return a single-level row for CSV/paper tables."""
@@ -66,6 +68,8 @@ class ExperimentMetrics:
             "model_name": self.model_name,
             "env_name": self.env_name,
             "seed": self.seed,
+            "evaluation_start": self.evaluation_start,
+            "greedy_eval": self.greedy_eval,
         }
 
         def _flatten(prefix: str, d: dict[str, Any]) -> None:
@@ -95,6 +99,8 @@ def aggregate_metrics(
     diverged: bool = False,
     drop_count: int = 0,
     arrivals: int = 0,
+    evaluation_start: str = "zero",
+    greedy_eval: bool = False,
 ) -> ExperimentMetrics:
     """Aggregate event traces into the required dual-column metric set."""
     weights = dt_trace.clamp_min(1e-9)
@@ -104,6 +110,7 @@ def aggregate_metrics(
     weighted_cost = (cost_trace * weights).sum() / total_time
     slack = torch.cat([d.certificate_slack.detach().flatten().cpu() for d in diagnostics])
     usage_final = torch.cat([d.usage_final.detach().flatten().cpu() for d in diagnostics])
+    finite_usage = usage_final[torch.isfinite(usage_final)]
     batch_sizes = [d.certificate_slack.detach().flatten().shape[0] for d in diagnostics]
     fallback = torch.cat([torch.zeros(b, dtype=torch.bool) for b in batch_sizes])
     projection_active = torch.cat([torch.zeros(b, dtype=torch.bool) for b in batch_sizes])
@@ -141,8 +148,8 @@ def aggregate_metrics(
         proposal_slack_min=float(proposal_slack.min().item()),
         proposal_slack_mean=float(proposal_slack.mean().item()),
         tail_fallback_activation_rate=float(fallback.float().mean().item()),
-        usage_activation_rate=float((usage_final > 0.1).float().mean().item()),
-        usage_mean_activation=float(usage_final.mean().item()),
+        usage_activation_rate=float((finite_usage > 0.1).float().mean().item()) if finite_usage.numel() else float("nan"),
+        usage_mean_activation=float(finite_usage.mean().item()) if finite_usage.numel() else float("nan"),
         correction_magnitude=float(correction.max().item()),
         instability_rate=float(1.0 if diverged else 0.0),
         pressure_mean=float(pressure_mean.mean().item()),
@@ -153,6 +160,8 @@ def aggregate_metrics(
         model_name=model_name,
         env_name=env_name,
         seed=seed,
+        evaluation_start=evaluation_start,
+        greedy_eval=greedy_eval,
         performance=performance,
         certificate=certificate,
     )

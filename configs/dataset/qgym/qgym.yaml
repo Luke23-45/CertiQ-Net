@@ -30,10 +30,10 @@ qgym:
     imitation_warmup_epochs: 30
     critic_bootstrap_epochs: 3
     imitation_decay_rate: 0.96
-    expert_mode: qmd
+    expert_mode: sed
     gamma: 0.99
     gae_lambda: 0.95
-    val_horizon_max: 8
+    val_horizon_max: 64
   loss:
     omega_bc: 1.0
     omega_action: 1.5

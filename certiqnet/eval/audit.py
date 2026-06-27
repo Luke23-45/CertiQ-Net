@@ -7,7 +7,7 @@ import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 
-from certiqnet.data.common.state_bank import generate_state_bank
+from certiqnet.data.common.state_bank import generate_adversarial_states, generate_state_bank
 from certiqnet.data.registry import DatasetRegistry
 from certiqnet.eval._base import discover_and_prepare
 from certiqnet.experiments.persistence.checkpoint import load_checkpoint_weights
@@ -78,39 +78,56 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
         )
         run_logger.info("state_bank_generated", states=Q_bank.shape[0])
 
-        mu_bank = mu.unsqueeze(0).expand(Q_bank.shape[0], -1)
-        if adapter is not None:
-            Q_bank, mu_bank, xi_bank = adapter.make_observation(Q_bank, mu_bank)
-        else:
-            xi_bank = None
-        with torch.no_grad():
-            if hasattr(model, "reset_dispatch_state"):
-                model.reset_dispatch_state()
-            _, diag = model(Q_bank, mu_bank, xi_bank, training_mode=False)
-
-        violation = (diag.A_final - diag.B_Q).clamp(min=0.0)
-        audit_env_name = str(data_init_args.get("dataset_name", ""))
-        audit_metrics = aggregate_metrics(
-            model_name=str(cfg.model._target_).split(".")[-1],
-            env_name=audit_env_name,
-            seed=int(cfg.project.seed),
-            lam=lam,
-            queue_trace=Q_bank,
-            cost_trace=Q_bank.sum(dim=-1),
-            dt_trace=torch.ones(Q_bank.shape[0]),
-            diagnostics=[diag],
+        run_logger.info("generating_adversarial_state_bank")
+        Q_adv = generate_adversarial_states(
+            model=model,
+            mu=mu,
+            N=N_audit,
+            n_states=128,
+            n_steps=25,
         )
-        save_metrics([audit_metrics], paths.audits, filename="state_bank_audit")
-        run_logger.metric(audit_metrics.flat())
+        run_logger.info("adversarial_state_bank_generated", states=Q_adv.shape[0])
+
+        def _eval_bank(name: str, Q_in: torch.Tensor) -> torch.Tensor:
+            mu_bank = mu.unsqueeze(0).expand(Q_in.shape[0], -1)
+            if adapter is not None:
+                Q_obs, mu_obs, xi_obs = adapter.make_observation(Q_in, mu_bank)
+            else:
+                Q_obs, mu_obs, xi_obs = Q_in, mu_bank, None
+            with torch.no_grad():
+                if hasattr(model, "reset_dispatch_state"):
+                    model.reset_dispatch_state()
+                _, diag = model(Q_obs, mu_obs, xi_obs, training_mode=False)
+            violation = (diag.A_final - diag.B_Q).clamp(min=0.0)
+            metrics = aggregate_metrics(
+                model_name=str(cfg.model._target_).split(".")[-1],
+                env_name=str(data_init_args.get("dataset_name", "")),
+                seed=int(cfg.project.seed),
+                lam=lam,
+                queue_trace=Q_in,
+                cost_trace=Q_in.sum(dim=-1),
+                dt_trace=torch.ones(Q_in.shape[0]),
+                diagnostics=[diag],
+                evaluation_start=name,
+                greedy_eval=False,
+            )
+            save_metrics([metrics], paths.audits, filename=f"{name}_audit")
+            run_logger.metric(metrics.flat())
+            print(f"{name}_states={Q_in.shape[0]}")
+            print(f"{name}_max_violation={violation.max().item():.6e}")
+            print(f"{name}_violation_rate={(violation > 0).float().mean().item():.6e}")
+            print(f"{name}_usage_open_rate={(diag.usage_final > 0.1).float().mean().item():.6e}")
+            print(f"{name}_usage_mean={diag.usage_final.nanmean().item():.6e}")
+            print(f"{name}_min_certificate_slack={diag.certificate_slack.min().item():.6e}")
+            return violation
+
+        state_violation = _eval_bank("state_bank", Q_bank)
+        adv_violation = _eval_bank("adversarial_state_bank", Q_adv)
         run_logger.flush()
 
-        print(f"states={Q_bank.shape[0]}")
-        print(f"max_violation={violation.max().item():.6e}")
-        print(f"violation_rate={(violation > 0).float().mean().item():.6e}")
-        print(f"fallback_rate=0.000000e+00")
-        print(f"usage_open_rate={(diag.usage_final > 0.1).float().mean().item():.6e}")
-        print(f"usage_mean={diag.usage_final.nanmean().item():.6e}")
-        print(f"min_certificate_slack={diag.certificate_slack.min().item():.6e}")
+        print("fallback_rate=0.000000e+00")
+        print(f"state_bank_max_violation={state_violation.max().item():.6e}")
+        print(f"adversarial_state_bank_max_violation={adv_violation.max().item():.6e}")
 
     except BaseException as exc:
         audit_error = exc

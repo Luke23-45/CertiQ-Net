@@ -189,9 +189,11 @@ class CertiQIndexModel(nn.Module):
             B_Q=budget,
             certificate_slack=budget - a_final,
             constraint_violation=constraint_violation,
-            usage_raw=torch.ones(batch, device=Q.device, dtype=Q.dtype),
-            usage_final=torch.ones(batch, device=Q.device, dtype=Q.dtype),
-            usage_cap=torch.ones(batch, device=Q.device, dtype=Q.dtype),
+            # Usage diagnostics are not implemented for lagrangian mode yet.
+            # Use NaN so downstream logs and metrics can treat them as unavailable.
+            usage_raw=torch.full((batch,), float("nan"), device=Q.device, dtype=Q.dtype),
+            usage_final=torch.full((batch,), float("nan"), device=Q.device, dtype=Q.dtype),
+            usage_cap=torch.full((batch,), float("nan"), device=Q.device, dtype=Q.dtype),
             policy_entropy=-(pi * pi.clamp_min(1e-9).log()).sum(dim=-1),
             selected_resource=pi.argmax(dim=-1),
             pressure_mean=torch.zeros(batch, device=Q.device, dtype=Q.dtype),

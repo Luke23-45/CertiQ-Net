@@ -463,6 +463,8 @@ class DatasetRegistry:
             try:
                 with open(meta_path) as f:
                     meta = yaml.safe_load(f) or {}
+                if meta.get("registry_status") not in (None, "match"):
+                    return False
                 matches = _metadata_matches_spec(meta, self.get(name))
                 if matches is False:
                     return False
@@ -494,15 +496,20 @@ class DatasetRegistry:
                     "exists": exists,
                     "path": str(path),
                 }
-                if exists:
-                    meta_path = path / "metadata.yaml"
-                    if meta_path.exists():
-                        with open(meta_path) as f:
-                            meta = yaml.safe_load(f) or {}
-                        info["metadata"] = meta
-                        matches = _metadata_matches_spec(meta, self.get(n))
-                        if matches is not None:
-                            info["spec_matches_registry"] = matches
+                meta_path = path / "metadata.yaml"
+                if meta_path.exists():
+                    with open(meta_path) as f:
+                        meta = yaml.safe_load(f) or {}
+                    info["metadata"] = meta
+                    if "registry_status" in meta:
+                        info["registry_status"] = meta["registry_status"]
+                    if "registry_spec_hash" in meta:
+                        info["registry_spec_hash"] = meta["registry_spec_hash"]
+                    if "collection_override" in meta:
+                        info["collection_override"] = meta["collection_override"]
+                    matches = _metadata_matches_spec(meta, self.get(n))
+                    if matches is not None:
+                        info["spec_matches_registry"] = matches
                 result[n] = info
             except KeyError:
                 result[n] = {"exists": False, "error": f"Unknown dataset '{n}'"}

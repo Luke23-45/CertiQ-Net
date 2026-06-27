@@ -266,7 +266,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             lam=float(lam),
             gamma=float(trainer_container.get("gamma", 0.99)),
             gae_lambda=float(trainer_container.get("gae_lambda", 0.95)),
-            val_horizon_max=int(trainer_container.get("val_horizon_max", 8)),
+            val_horizon_max=int(trainer_container.get("val_horizon_max", 64)),
             dual_lambda_lr=float(lagrangian_container.get("dual_lambda_lr", 0.01)),
             dual_lambda_init=float(lagrangian_container.get("dual_lambda_init", 0.0)),
             dual_lambda_momentum=float(lagrangian_container.get("dual_lambda_momentum", 0.9)),

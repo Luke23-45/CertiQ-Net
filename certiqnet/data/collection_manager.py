@@ -265,10 +265,24 @@ class DatasetCollectionManager:
 
         # ── Write metadata ────────────────────────────────────────────
         commit = _git_commit_hash(Path(__file__).resolve().parents[2])
+        registry_status = "unregistered"
+        registry_spec_hash = None
+        try:
+            registry_spec = self._registry.get(spec.name)
+            registry_spec_hash = dataset_spec_hash(registry_spec)
+            registry_status = (
+                "match"
+                if registry_spec_hash == dataset_spec_hash(spec)
+                else "mismatch"
+            )
+        except KeyError:
+            pass
         metadata = {
             "dataset_name": spec.name,
             "env_config": str(resolve_env_config_path(str(spec.env))),
             "spec_hash": dataset_spec_hash(spec),
+            "registry_status": registry_status,
+            "registry_spec_hash": registry_spec_hash,
             "n_train": n_train,
             "n_valid": spec.collection.n_valid,
             "n_test": spec.collection.n_test,
@@ -323,6 +337,8 @@ class DatasetCollectionManager:
         spec_path = output_dir / "dataset_spec.yaml"
         spec_dict = self._registry.spec_to_dict(spec)
         spec_dict["spec_hash"] = dataset_spec_hash(spec)
+        spec_dict["registry_status"] = registry_status
+        spec_dict["registry_spec_hash"] = registry_spec_hash
         with open(spec_path, "w") as f:
             yaml.dump(spec_dict, f, default_flow_style=False, sort_keys=False)
         log.info("Dataset spec saved to %s", spec_path)

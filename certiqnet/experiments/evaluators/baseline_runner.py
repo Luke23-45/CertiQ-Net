@@ -142,6 +142,7 @@ def evaluate_policy(
         model.reset_dispatch_state()
     adapter = adapter if adapter is not None else QueueingAdapter(assumptions_satisfied=True)
     env = CTMCEnvironment(N=N, lam=lam, mu=mu, B=rollout.batch_size)
+    evaluation_start = "qgym_test" if qgym_test_states is not None else "zero"
     # Initialise from QGym test states when available
     if qgym_test_states is not None:
         n_avail = qgym_test_states.shape[0]
@@ -186,6 +187,8 @@ def evaluate_policy(
         diagnostics=diagnostics,
         diverged=diverged,
         arrivals=rollout.steps * rollout.batch_size,
+        evaluation_start=evaluation_start,
+        greedy_eval=rollout.greedy_eval and _has_learnable_params(model),
     )
 
 
