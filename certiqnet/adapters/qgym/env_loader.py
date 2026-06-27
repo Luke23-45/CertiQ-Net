@@ -161,14 +161,30 @@ def load_qgym_env(
 def compute_effective_mu(
     network: torch.Tensor,
     mu_matrix: torch.Tensor,
+    pool_size: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Compute per-queue effective service rate from ``(s, q)`` topology.
 
-    ``effective_mu[q] = sum_s network[s, q] * mu_matrix[s, q]``
+    ``effective_mu[q] = sum_s (pool_size[s] * network[s, q] * mu_matrix[s, q])``
+    When *pool_size* is ``None`` each server is assumed to have count 1.
 
-    This is the total service capacity directed at each queue.
+    Parameters
+    ----------
+    network : Tensor
+        Server-queue connectivity of shape ``(s, q)``.
+    mu_matrix : Tensor
+        Per-server service-rate matrix of shape ``(s, q)``.
+    pool_size : Tensor | None
+        Number of servers in each pool, shape ``(s,)``.  ``None`` → all 1.
+
+    Returns
+    -------
+    Tensor of shape ``(q,)`` — total service capacity per queue.
     """
-    return (network * mu_matrix).sum(dim=0)
+    weighted = network * mu_matrix
+    if pool_size is not None:
+        weighted = pool_size.unsqueeze(-1) * weighted
+    return weighted.sum(dim=0)
 
 
 def compute_queue_holding_cost(

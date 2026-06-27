@@ -235,6 +235,20 @@ class QGymAdapter(DispatchAdapter):
 
     # ── Environment construction ──────────────────────────────────────
 
+    def _get_pool_size(self) -> torch.Tensor | None:
+        """Extract server-pool-size vector from env config, or None."""
+        if self._env_config is None:
+            return None
+        if isinstance(self._env_config, QGymEnvConfig):
+            raw = self._env_config.server_pool_size
+        elif isinstance(self._env_config, dict):
+            raw = self._env_config.get("server_pool_size")
+        else:
+            raw = None
+        if raw is not None:
+            return torch.tensor(raw, dtype=torch.float)
+        return None
+
     def _build_env(self):
         """Build the QGym environment from the stored config."""
         if isinstance(self._env_config, QGymEnvConfig):
@@ -286,6 +300,7 @@ class QGymAdapter(DispatchAdapter):
         mu_effective = compute_effective_mu(
             torch.tensor(network_np, dtype=torch.float),
             torch.tensor(mu_matrix, dtype=torch.float),
+            pool_size=self._get_pool_size(),
         ).numpy()
 
         return network_np, mu_effective, s, q
@@ -511,6 +526,7 @@ class QGymAdapter(DispatchAdapter):
                 else np.array(env.mu),
                 dtype=torch.float,
             ),
+            pool_size=self._get_pool_size(),
         )
 
         # Seed numpy RNG from generator for reproducibility
