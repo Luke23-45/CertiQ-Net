@@ -6,7 +6,7 @@ qgym:
   data:
     class_path: certiqnet.data.qgym.datamodule.QGymDataModule
     init_args:
-      dataset_name: re-reentrant_3_hyper
+      dataset_name: n_model_large
       auto_collect: true
       batch_size: 64
       n_samples: 512

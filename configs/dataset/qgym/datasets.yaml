@@ -76,3 +76,71 @@ datasets:
   re-reentrant_3_hyper_debug:
     <<: *rre3h
     collection: {n_steps: 10000, n_valid: 1000, n_test: 1000, shard_size: 5000}
+
+  # ── HARD ENVIRONMENTS (heuristics fail) ─────────────────────────────
+
+  # criss_cross_bh: 3 queues, 2 servers, asymmetric bottleneck.
+  # SED/MP both degrade catastrophically on this topology.
+  criss_cross_bh: &cc_bh
+    env: extern/QGym/configs/env/criss_cross_bh.yaml
+    env_N: 3
+    env_lam: 1.800001
+
+  criss_cross_bh_debug:
+    <<: *cc_bh
+    collection: {n_steps: 10000, n_valid: 1000, n_test: 1000, shard_size: 5000}
+
+  # input_switch: 6 queues, 3 servers with disjoint queue-server pairs.
+  # Heuristic policies suffer from capacity misallocation.
+  input_switch: &is
+    env: extern/QGym/configs/env/input_switch.yaml
+    env_N: 6
+    env_lam: 2.4
+
+  input_switch_debug:
+    <<: *is
+    collection: {n_steps: 10000, n_valid: 1000, n_test: 1000, shard_size: 5000}
+
+  # n_model_large: 5 queues, 5 servers with random asymmetric service rates.
+  # cmu performs ~3x worse than max-weight on this topology.
+  n_model_large: &nml
+    env: extern/QGym/configs/env/n_model_large.yaml
+    env_N: 5
+    env_lam: 3.0478
+
+  n_model_large_debug:
+    <<: *nml
+    collection: {n_steps: 10000, n_valid: 1000, n_test: 1000, shard_size: 5000}
+
+  # n_model_giant: 5 queues with fully-connected dense service pool (500+ server types).
+  # Massive combinatorial action space; simple heuristics struggle to allocate globally.
+  n_model_giant: &nmg
+    env: extern/QGym/configs/env/n_model_giant.yaml
+    env_N: 5
+    env_lam: 3.0022
+
+  n_model_giant_debug:
+    <<: *nmg
+    collection: {n_steps: 10000, n_valid: 1000, n_test: 1000, shard_size: 5000}
+
+  # n_model_5x5: 5 queues, 5 servers, N-model routing topology.
+  # cmu=17.8 vs MW=15.2 — clear RL advantage.
+  n_model_5x5: &nm5
+    env: extern/QGym/configs/env/n_model_5x5.yaml
+    env_N: 5
+    env_lam: 1.615
+
+  n_model_5x5_debug:
+    <<: *nm5
+    collection: {n_steps: 10000, n_valid: 1000, n_test: 1000, shard_size: 5000}
+
+  # hospital: 9 queues, 13 server types, realistic clinical routing topology.
+  # High arrival rates, asymmetric flows — heuristics cannot handle well.
+  hospital: &hosp
+    env: extern/QGym/configs/env/hospital.yaml
+    env_N: 9
+    env_lam: 93.2
+
+  hospital_debug:
+    <<: *hosp
+    collection: {n_steps: 10000, n_valid: 1000, n_test: 1000, shard_size: 5000}
