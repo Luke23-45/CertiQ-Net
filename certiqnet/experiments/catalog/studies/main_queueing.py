@@ -27,5 +27,19 @@ main_queueing_study = StudySpec(
             adapter="queueing",
             seeds=[42],
         ),
+        TrainingVariant(
+            label="n_model_large",
+            dataset="n_model_large",
+            model="certiq_index",
+            adapter="queueing",
+            seeds=[42],
+        ),
+        TrainingVariant(
+            label="hospital",
+            dataset="hospital",
+            model="certiq_index",
+            adapter="queueing",
+            seeds=[42],
+        ),
     ],
 )
