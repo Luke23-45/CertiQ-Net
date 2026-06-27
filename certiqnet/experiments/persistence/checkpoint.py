@@ -30,6 +30,10 @@ class CheckpointNotFoundError(Exception):
     """Raised when no valid checkpoint state is found for the experiment root."""
 
 
+class CheckpointMismatchError(Exception):
+    """Raised when a checkpoint exists but has 0 overlapping keys with the model."""
+
+
 @dataclass(frozen=True)
 class CheckpointState:
     experiment_name: str
@@ -140,12 +144,34 @@ def require_checkpoint_state(paths_root: Path) -> Path:
 def load_checkpoint_weights(model: torch.nn.Module, paths_root: Path) -> None:
     ckpt_path = require_checkpoint_state(paths_root)
     raw = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
+
     if isinstance(raw, dict) and "state_dict" in raw:
         sd = raw["state_dict"]
         cleaned = {k.removeprefix("model."): v for k, v in sd.items() if k.startswith("model.")}
-        model.load_state_dict(cleaned, strict=False)
     else:
-        model.load_state_dict(raw, strict=False)
+        cleaned = raw
+
+    model_keys = set(model.state_dict().keys())
+    ckpt_keys = set(cleaned.keys())
+    common = model_keys & ckpt_keys
+
+    if not common:
+        raise CheckpointMismatchError(
+            f"Checkpoint has 0 overlapping keys with model. "
+            f"Model: {len(model_keys)} keys, Checkpoint: {len(ckpt_keys)} keys. "
+            f"Check that the checkpoint matches the model architecture."
+        )
+
+    result = model.load_state_dict(cleaned, strict=False)
+
+    missing = result.missing_keys
+    unexpected = result.unexpected_keys
+    if missing or unexpected:
+        print(
+            f"[checkpoint] Loaded {len(common)}/{len(model_keys)} keys "
+            f"({len(missing)} missing, {len(unexpected)} unexpected).",
+            file=sys.stderr,
+        )
 
 
 # ── Experiment-level "last run" discovery ──────────────────────────────

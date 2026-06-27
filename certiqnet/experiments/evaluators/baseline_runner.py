@@ -234,7 +234,13 @@ def run_baseline_comparison(
     total = len(models)
     metrics: list[ExperimentMetrics] = []
     for idx, (name, model) in enumerate(models.items(), start=1):
-        _log(f"── Baseline [{idx}/{total}] {name} ── (evaluating...)")
+        model_type = type(model).__name__
+        use_greedy = rollout.greedy_eval and _has_learnable_params(model)
+        n_params = sum(p.numel() for p in model.parameters() if p.requires_grad) if use_greedy else 0
+        desc = f"type={model_type}"
+        if use_greedy:
+            desc += f" greedy params={n_params}"
+        _log(f"── Baseline [{idx}/{total}] {name} ── ({desc})")
         try:
             result = evaluate_policy(
                 name=name,
