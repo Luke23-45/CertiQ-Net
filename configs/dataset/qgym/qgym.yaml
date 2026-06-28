@@ -22,34 +22,13 @@ qgym:
     lr: 1.0e-4
     weight_decay: 1.0e-5
     rollout_horizon: 64
-    use_ppo: false
-    supervised_only: true
-    ppo_epochs: 2
-    ppo_clip_epsilon: 0.15
-    ppo_manual_clip_val: 5.0
-    entropy_warmup_epochs: 0
-    imitation_warmup_epochs: 0
-    critic_bootstrap_epochs: 0
-    imitation_decay_rate: 0.96
-    expert_mode: sed
+    imitation_warmup_epochs: 20
+    expert_mode: qmd
     gamma: 0.99
-    gae_lambda: 0.95
     val_horizon_max: 64
   loss:
-    omega_bc: 1.0
     omega_action: 1.5
     omega_margin: 0.1
-    omega_usage: 0.1
-    rollout_weight: 1.0
-    policy_kl_weight: 0.05
-    value_weight: 1.0
-    entropy_weight: 0.02
-  lagrangian:
-    dual_lambda_lr: 0.01
-    dual_lambda_init: 0.0
-    dual_lambda_momentum: 0.9
-    dual_lr_warmup_steps: 10
-    dual_lambda_max: 10.0
-    dual_lr_decay: 1.0
-    target_kl_cert: 0.01
-    initial_policy_kl_weight: 0.05
+    omega_roll: 1.0
+    omega_ent: 0.02
+    omega_kl: 0.05

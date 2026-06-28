@@ -48,7 +48,6 @@ def _model_device(model: _ModelLike) -> torch.device:
 
 class _LightningLike(Protocol):
     model: _ModelLike
-    dual_lambda: Tensor
 
     def log(self, name: str, value: object, prog_bar: bool = False) -> None: ...
 
@@ -94,17 +93,15 @@ class CertificateAuditCallback(pl.Callback if pl is not None else object):
         max_violation = (diag.A_final - diag.B_Q).clamp(min=0).max().item()
         pl_module.log("audit/max_violation", max_violation, prog_bar=True)
         pl_module.log("audit/violation_rate", (diag.A_final > diag.B_Q).float().mean(), prog_bar=True)
-        pl_module.log("audit/dual_lambda", pl_module.dual_lambda, prog_bar=True)
 
         fin_cb = getattr(model, "C", float("inf")) < float("inf")
         epoch = trainer.current_epoch
-        constraint_mode = getattr(model, "constraint_mode", "projection")
+        constraint_mode = getattr(model, "constraint_mode", "exact")
 
         if not fin_cb:
             return
 
-        # Projection mode: original strict assertion (constraint is guaranteed by projection)
-        # Lagrangian mode: observational only — constraints are satisfied asymptotically
+        # Exact projection mode: strict assertion after the warmup window.
         if constraint_mode != "lagrangian" and epoch >= self.assert_after_epoch:
             if max_violation > self.violation_tol:
                 raise AssertionError(

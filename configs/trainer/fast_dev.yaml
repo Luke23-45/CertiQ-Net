@@ -24,6 +24,5 @@ trainer:
 # Override the QGym datatype profile for fast dev
 qgym:
   trainer:
-    use_ppo: false
     rollout_horizon: 8
     val_horizon_max: 4

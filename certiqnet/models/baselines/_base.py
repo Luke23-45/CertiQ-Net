@@ -26,7 +26,7 @@ def make_lagrangian_diagnostics(
     C: float,
     cost: Tensor | None = None,
 ) -> DispatcherDiagnostics:
-    """Build DispatcherDiagnostics for a baseline policy (PPO-Lagrangian)."""
+    """Build DispatcherDiagnostics for a baseline policy."""
     batch = Q.shape[0]
     device = Q.device
     y = cost if cost is not None else Q / mu.pow(beta).clamp_min(torch.finfo(mu.dtype).tiny)
@@ -56,6 +56,5 @@ def make_lagrangian_diagnostics(
         fallback_flag=torch.zeros_like(nan),
         correction_magnitude=torch.zeros_like(nan),
     )
-
 
 

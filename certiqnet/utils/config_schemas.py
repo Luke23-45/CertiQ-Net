@@ -12,7 +12,6 @@ __all__ = [
     "ProgressConfig",
     "SweepConfig",
     "DatatypeTrainerConfig",
-    "DatatypeLagrangianConfig",
     "DatatypeProfileConfig",
     "RootConfig",
 ]
@@ -47,32 +46,10 @@ class DatatypeTrainerConfig:
     lr: float = MISSING
     weight_decay: float = MISSING
     rollout_horizon: int = MISSING
-    use_ppo: bool = MISSING
-    supervised_only: bool = MISSING
-    ppo_epochs: int = MISSING
-    ppo_clip_epsilon: float = MISSING
-    ppo_manual_clip_val: float = MISSING
-    entropy_warmup_epochs: int = MISSING
     imitation_warmup_epochs: int = MISSING
-    critic_bootstrap_epochs: int = MISSING
-    imitation_decay_rate: float = MISSING
     expert_mode: str = MISSING
     gamma: float = MISSING
-    gae_lambda: float = MISSING
     val_horizon_max: int = MISSING
-
-
-@dataclass
-class DatatypeLagrangianConfig:
-    """Lagrangian dual-variable hyperparameters that differ per datatype."""
-    dual_lambda_lr: float = MISSING
-    dual_lambda_init: float = MISSING
-    dual_lambda_momentum: float = MISSING
-    dual_lr_warmup_steps: int = MISSING
-    dual_lambda_max: float = MISSING
-    dual_lr_decay: float = MISSING
-    target_kl_cert: float = MISSING
-    initial_policy_kl_weight: float = MISSING
 
 
 @dataclass
@@ -81,22 +58,16 @@ class DatatypeProfileConfig:
     data: Any = MISSING
     trainer: DatatypeTrainerConfig = MISSING
     loss: LossConfig = MISSING
-    lagrangian: DatatypeLagrangianConfig = MISSING
     input_normalization: str = "none"
 
 
 @dataclass
 class LossConfig:
-    omega_bc: float = 1.0
     omega_action: float = 1.5
     omega_margin: float = 0.1
-    omega_usage: float = 0.1
-    omega_ent: float = 0.0
-    rollout_weight: float = 1.0
-    policy_kl_weight: float = 0.05
-    value_weight: float = 1.0
-    entropy_weight: float = 0.001
-    distillation_temperature: float = 1.0
+    omega_roll: float = 1.0
+    omega_ent: float = 0.001
+    omega_kl: float = 0.05
 
 
 @dataclass

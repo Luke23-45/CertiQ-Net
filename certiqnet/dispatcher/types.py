@@ -3,15 +3,14 @@
 from dataclasses import dataclass, field
 
 import torch
-
 from torch import Tensor
 
 
 @dataclass(frozen=True)
 class DispatcherDiagnostics:
     """Diagnostics for one forward pass (constraint-violation fields are
-    for logging / monitoring only — the Lagrangian dual variable is
-    managed by the training module, not produced by the model)."""
+    for logging / monitoring only. The model itself does not produce or
+    update any dual variable.)"""
 
     A_proposal: Tensor
     A_final: Tensor
@@ -46,7 +45,6 @@ class DispatcherForward:
 
     pi: Tensor
     diagnostics: DispatcherDiagnostics
-    value: Tensor
     p_cert: Tensor
     p_proposal: Tensor
     usage_raw: Tensor

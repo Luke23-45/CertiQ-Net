@@ -3,8 +3,7 @@
 # configs/experiments/main_queueing.yaml
 #
 # Study runner config for the exact-certified queueing family.
-# The pipeline reads cfg[datatype] to select data, trainer, loss, and
-# lagrangian parameters.
+# The pipeline reads cfg[datatype] to select data, trainer, and loss parameters.
 # ──────────────────────────────────────────────────────────────────────────────
 defaults:
   - /model: certiq_index

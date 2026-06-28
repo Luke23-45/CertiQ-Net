@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import csv
 import json
-import math
 import random
 import shutil
-import sys
 import traceback
 from pathlib import Path
 
@@ -15,22 +13,22 @@ from omegaconf import DictConfig, OmegaConf
 
 from certiqnet.data.qgym.datamodule import QGymDataModule
 from certiqnet.data.registry import DatasetRegistry
+from certiqnet.experiments.evaluators.factory import build_model, build_mu
 from certiqnet.experiments.persistence.checkpoint import (
     save_checkpoint_state,
     save_last_run,
 )
-from certiqnet.experiments.evaluators.factory import build_model, build_mu
 from certiqnet.experiments.persistence.logging import BufferedExperimentLogger as ExperimentLogger
-from certiqnet.experiments.persistence.paths import RunPaths, slugify
+from certiqnet.experiments.persistence.paths import RunPaths
 from certiqnet.experiments.runner import experiment_name_from_cfg, prepare_run
 from certiqnet.train._shared import (
     set_model_certificate_constant,
     validate_exact_certificate_constant,
     write_failure_artifacts,
 )
+from certiqnet.train.channel.module import ChannelLightningModule
 from certiqnet.train.common.loss import CertiQNetLoss
 from certiqnet.train.queueing.module import QueueingLightningModule
-from certiqnet.train.channel.module import ChannelLightningModule
 from certiqnet.utils.platform import detect_platform, resolve_trainer_config
 from certiqnet.utils.progress import configure_progress
 
@@ -154,7 +152,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
         if profile is None:
             raise ValueError(
                 f"Config must include a '{datatype}' block with data, "
-                "trainer, loss, and lagrangian sections."
+                "trainer and loss sections."
             )
 
         data_init_args = dict(profile.data.init_args)
@@ -220,14 +218,11 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
         if not isinstance(loss_cfg, dict):
             loss_cfg = {}
         loss_fn = CertiQNetLoss(
-            omega_bc=float(loss_cfg.get("omega_bc", 1.0)),
             omega_action=float(loss_cfg.get("omega_action", 1.5)),
             omega_margin=float(loss_cfg.get("omega_margin", 0.1)),
-            omega_usage=float(loss_cfg.get("omega_usage", 0.1)),
-            rollout_weight=float(loss_cfg.get("rollout_weight", 1.0)),
-            policy_kl_weight=float(loss_cfg.get("policy_kl_weight", 0.05)),
-            value_weight=float(loss_cfg.get("value_weight", 1.0)),
-            entropy_weight=float(loss_cfg.get("entropy_weight", 0.001)),
+            omega_roll=float(loss_cfg.get("omega_roll", 1.0)),
+            omega_ent=float(loss_cfg.get("omega_ent", 0.001)),
+            omega_kl=float(loss_cfg.get("omega_kl", 0.05)),
         )
 
         trainer_profile = profile.get("trainer")
@@ -236,11 +231,6 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
         trainer_container = OmegaConf.to_container(trainer_profile, resolve=True)
         if not isinstance(trainer_container, dict):
             raise TypeError(f"'{datatype}'.trainer must resolve to a mapping")
-
-        lagrangian_profile = profile.get("lagrangian")
-        lagrangian_container = OmegaConf.to_container(lagrangian_profile, resolve=True) if lagrangian_profile is not None else {}
-        if not isinstance(lagrangian_container, dict):
-            lagrangian_container = {}
 
         input_normalization = str(getattr(profile, "input_normalization", "none"))
 
@@ -251,29 +241,11 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             lr=float(trainer_container.get("lr", 3e-4)),
             weight_decay=float(trainer_container.get("weight_decay", 1e-5)),
             rollout_horizon=int(trainer_container.get("rollout_horizon", 64)),
-            use_ppo=bool(trainer_container.get("use_ppo", True)),
-            supervised_only=bool(trainer_container.get("supervised_only", False)),
-            ppo_epochs=int(trainer_container.get("ppo_epochs", 4)),
-            ppo_clip_epsilon=float(trainer_container.get("ppo_clip_epsilon", 0.2)),
-            ppo_manual_clip_val=float(trainer_container.get("ppo_manual_clip_val", 1.0)),
-            entropy_warmup_epochs=int(trainer_container.get("entropy_warmup_epochs", 20)),
             imitation_warmup_epochs=int(trainer_container.get("imitation_warmup_epochs", 20)),
-            expert_mode=str(trainer_container.get("expert_mode", "sed")),
-            critic_bootstrap_epochs=int(trainer_container.get("critic_bootstrap_epochs", 3)),
-            imitation_decay_rate=float(trainer_container.get("imitation_decay_rate", 0.96)),
-            target_kl_cert=float(lagrangian_container.get("target_kl_cert", 0.01)),
-            initial_policy_kl_weight=float(lagrangian_container.get("initial_policy_kl_weight", 0.05)),
-            entropy_weight=float(loss_cfg.get("entropy_weight", 0.001)),
+            expert_mode=str(trainer_container.get("expert_mode", "qmd")),
             lam=float(lam),
             gamma=float(trainer_container.get("gamma", 0.99)),
-            gae_lambda=float(trainer_container.get("gae_lambda", 0.95)),
             val_horizon_max=int(trainer_container.get("val_horizon_max", 64)),
-            dual_lambda_lr=float(lagrangian_container.get("dual_lambda_lr", 0.01)),
-            dual_lambda_init=float(lagrangian_container.get("dual_lambda_init", 0.0)),
-            dual_lambda_momentum=float(lagrangian_container.get("dual_lambda_momentum", 0.9)),
-            dual_lr_warmup_steps=int(lagrangian_container.get("dual_lr_warmup_steps", 10)),
-            dual_lambda_max=float(lagrangian_container.get("dual_lambda_max", 10.0)),
-            dual_lr_decay=float(lagrangian_container.get("dual_lr_decay", 1.0)),
         )
 
         if adapter_name in ("QueueingAdapter", "QGymAdapter"):

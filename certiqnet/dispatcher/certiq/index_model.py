@@ -82,11 +82,6 @@ class ResidualQMDScorer(nn.Module):
             nn.GELU(),
             nn.Linear(hidden_dim, 1),
         )
-        self.value_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, 1),
-        )
 
     @staticmethod
     def _make_mlp(in_dim: int, hidden_dim: int, out_dim: int, layers: int, dropout: float) -> nn.Sequential:
@@ -100,14 +95,13 @@ class ResidualQMDScorer(nn.Module):
                     modules.append(nn.Dropout(dropout))
         return nn.Sequential(*modules)
 
-    def forward(self, Q: Tensor, mu: Tensor, xi: Tensor | None = None) -> tuple[Tensor, Tensor]:
+    def forward(self, Q: Tensor, mu: Tensor, xi: Tensor | None = None) -> Tensor:
         token_features, global_features = _feature_stack(Q, mu, xi, self.d_xi)
         local = self.token_encoder(token_features)
         pooled = self.global_encoder(global_features)
         pooled_expanded = pooled.unsqueeze(1).expand(-1, Q.shape[1], -1)
         residual = self.readout(torch.cat([local, pooled_expanded], dim=-1)).squeeze(-1)
-        value = self.value_head(pooled).squeeze(-1)
-        return residual, value
+        return residual
 
 
 class CertiQIndexModel(nn.Module):
@@ -179,7 +173,7 @@ class CertiQIndexModel(nn.Module):
         batch, _ = Q.shape
         mu_b = expand_mu(Q, mu)
         base_index = self._base_geometry(Q, mu_b)
-        residual, value = self.scorer(Q, mu_b, xi)
+        residual = self.scorer(Q, mu_b, xi)
         learned_index = base_index + residual
 
         effective_tau = self.tau * (self.exploration_temperature if training_mode else 1.0)
@@ -237,7 +231,6 @@ class CertiQIndexModel(nn.Module):
         return DispatcherForward(
             pi=certified,
             diagnostics=diag,
-            value=value,
             p_cert=certified,
             p_proposal=proposal,
             usage_raw=diag.usage_raw,
