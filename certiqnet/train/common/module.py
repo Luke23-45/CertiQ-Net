@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn.functional as F
+from collections import deque
 from torch import Tensor, nn
 from torch.distributions import Categorical
 
@@ -13,8 +14,8 @@ except ModuleNotFoundError:
     pl = None
 
 from certiqnet.dispatcher.types import DispatcherDiagnostics
-from certiqnet.dispatcher.delay_geometry import quadratic_drift_index, sed_index
 from certiqnet.train.common.loss import CertiQNetLoss
+from certiqnet.data.qgym.context import build_qgym_context
 from certiqnet.utils.ctmc import CTMCEnvironment
 
 
@@ -81,43 +82,45 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         dm = getattr(self.trainer, "datamodule", None)
         adapter = getattr(dm, "adapter", None) if dm is not None else None
         if adapter is not None:
-            Q, mu, xi = adapter.make_observation(Q, mu)
+            Q, mu, adapter_xi = adapter.make_observation(Q, mu)
+            if xi is None:
+                xi = adapter_xi
         if mu.dim() == 1:
             mu = mu.unsqueeze(0).expand(Q.shape[0], -1)
         if self.input_normalization == "per_sample":
             col_max = Q.max(dim=-1, keepdim=True).values.clamp(min=1e-8)
             Q = Q / col_max
-        adapter_context_dim = int(getattr(adapter, "context_dim", 0)) if adapter is not None else 0
-        if self.context_dim > 0 and adapter_context_dim == 0:
-            xi = self._build_context_features(Q, mu)
-        elif self.context_dim > 0 and xi is not None and xi.shape[-1] == self.context_dim:
-            if torch.count_nonzero(xi).item() == 0:
-                xi = self._build_context_features(Q, mu)
+        if self.context_dim > 0:
+            if xi is None:
+                xi = build_qgym_context(Q, mu, context_dim=self.context_dim)
+            elif xi.shape[-1] != self.context_dim:
+                if xi.shape[-1] > self.context_dim:
+                    xi = xi[..., : self.context_dim]
+                else:
+                    pad = torch.zeros(*xi.shape[:-1], self.context_dim - xi.shape[-1], device=xi.device, dtype=xi.dtype)
+                    xi = torch.cat([xi, pad], dim=-1)
         return Q, mu, xi
 
-    def _build_context_features(self, Q: Tensor, mu: Tensor) -> Tensor:
-        """Construct per-queue ambiguity features for the residual scorer."""
-        mu_safe = mu.clamp_min(mu.new_tensor(1e-12))
-        qmd = quadratic_drift_index(Q, mu_safe)
-        sed = sed_index(Q, mu_safe)
-        total = Q.sum(dim=-1, keepdim=True).clamp_min(1e-9)
-        queue_share = Q / total
-        qmd_rank = torch.argsort(torch.argsort(qmd, dim=-1), dim=-1).float()
-        sed_rank = torch.argsort(torch.argsort(sed, dim=-1), dim=-1).float()
-        denom = max(Q.shape[-1] - 1, 1)
-        qmd_rank = qmd_rank / denom
-        sed_rank = sed_rank / denom
-        qmd_gap = (qmd - qmd.min(dim=-1, keepdim=True).values) / (qmd.abs().mean(dim=-1, keepdim=True) + 1.0)
-        sed_gap = (sed - sed.min(dim=-1, keepdim=True).values) / (sed.abs().mean(dim=-1, keepdim=True) + 1.0)
-        disagreement = (qmd.argmin(dim=-1) != sed.argmin(dim=-1)).float().unsqueeze(-1).expand_as(Q)
-        features = [queue_share, qmd_rank, sed_rank, qmd_gap, sed_gap, disagreement]
-        xi = torch.stack([f for f in features], dim=-1)
-        if xi.shape[-1] > self.context_dim:
-            xi = xi[..., : self.context_dim]
-        elif xi.shape[-1] < self.context_dim:
-            pad = torch.zeros(*xi.shape[:-1], self.context_dim - xi.shape[-1], device=xi.device, dtype=xi.dtype)
-            xi = torch.cat([xi, pad], dim=-1)
-        return xi
+    def _rollout_context(
+        self,
+        Q: Tensor,
+        mu: Tensor,
+        *,
+        history_Q: deque[Tensor],
+        history_action: deque[Tensor],
+        history_dt: deque[Tensor],
+    ) -> Tensor | None:
+        if self.context_dim <= 0:
+            return None
+        ctx_dim = self.context_dim
+        return build_qgym_context(
+            Q,
+            mu,
+            history_Q=list(history_Q),
+            history_action=list(history_action),
+            history_dt=list(history_dt),
+            context_dim=ctx_dim,
+        )
 
     # ── Training step ───────────────────────────────────────────────
 
@@ -135,6 +138,9 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         N = int(Q0.shape[-1])
         env = CTMCEnvironment(N=N, lam=self.lam, mu=mu0[0], B=Q0.shape[0])
         env.reset(Q0.detach().clone())
+        history_Q: deque[Tensor] = deque([Q0.detach().clone()], maxlen=max(2, min(4, self.rollout_horizon)))
+        history_action: deque[Tensor] = deque(maxlen=max(2, min(4, self.rollout_horizon)))
+        history_dt: deque[Tensor] = deque(maxlen=max(2, min(4, self.rollout_horizon)))
 
         policy_diagnostics: list[DispatcherDiagnostics] = []
         log_probs: list[Tensor] = []
@@ -143,7 +149,13 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         for _ in range(self.rollout_horizon):
             Q_obs = env.Q.clone()
             mu_obs = mu0
-            xi_obs = xi0
+            xi_obs = self._rollout_context(
+                Q_obs,
+                mu_obs,
+                history_Q=history_Q,
+                history_action=history_action,
+                history_dt=history_dt,
+            )
             Q_obs, mu_obs, xi_obs = self._make_observation(Q_obs, mu_obs, xi_obs)
             out = self.model.forward_full(Q_obs, mu_obs, xi_obs, training_mode=True)
             dist = Categorical(probs=out.pi)
@@ -154,6 +166,9 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             policy_diagnostics.append(out.diagnostics)
             log_probs.append(dist.log_prob(action_idx))
             rewards.append(reward)
+            history_action.append(action_pi.detach())
+            history_dt.append(step["dt"].detach())
+            history_Q.append(step["Q"].detach())
 
         rewards_t = torch.stack(rewards, dim=0)
         log_probs_t = torch.stack(log_probs, dim=0)
@@ -206,6 +221,9 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 B=init_Q.shape[0],
             )
             env.reset(init_Q.detach().clone())
+            history_Q: deque[Tensor] = deque([init_Q.detach().clone()], maxlen=max(2, min(4, horizon)))
+            history_action: deque[Tensor] = deque(maxlen=max(2, min(4, horizon)))
+            history_dt: deque[Tensor] = deque(maxlen=max(2, min(4, horizon)))
             policy_diagnostics: list[DispatcherDiagnostics] = []
             queue_trace: list[Tensor] = []
             cost_trace: list[Tensor] = []
@@ -214,7 +232,13 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 for _ in range(horizon):
                     Q_obs = env.Q.clone()
                     mu_obs = init_mu
-                    xi_obs = init_xi
+                    xi_obs = self._rollout_context(
+                        Q_obs,
+                        mu_obs,
+                        history_Q=history_Q,
+                        history_action=history_action,
+                        history_dt=history_dt,
+                    )
                     Q_obs, mu_obs, xi_obs = self._make_observation(Q_obs, mu_obs, xi_obs)
                     out = self.model.forward_full(Q_obs, mu_obs, xi_obs, training_mode=False)
                     action_idx = out.pi.argmax(dim=-1)
@@ -224,6 +248,9 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                     queue_trace.append(step["Q"].detach())
                     cost_trace.append(step["cost"].detach())
                     dt_trace.append(step["dt"].detach())
+                    history_action.append(action_pi.detach())
+                    history_dt.append(step["dt"].detach())
+                    history_Q.append(step["Q"].detach())
             diag = _stack_mean(policy_diagnostics)
             backlog = torch.cat(queue_trace, dim=0).sum(dim=-1).float()
             cost_t = torch.cat(cost_trace, dim=0).float()
@@ -246,7 +273,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self.log("val/selection_score", selection_score, prog_bar=False)
         self._log_diagnostics(primary_diag, "val")
 
-        if xi is not None or Q.abs().sum().item() > 0:
+        if Q.abs().sum().item() > 0:
             aux_diag, aux_avg_cost, aux_p95_backlog, aux_violation, aux_violation_rate = _run_rollout(
                 Q, mu, xi, val_horizon
             )

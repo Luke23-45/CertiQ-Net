@@ -167,6 +167,7 @@ class DatasetCollectionManager:
         Q_all = batch.Q.float()
         cost_all = batch.cost.float()
         mu_vec = batch.mu[0].float()
+        xi_all = batch.xi.float() if batch.xi is not None else None
         h_vec = adapter.env_h
         reward_all = batch.reward.float() if batch.reward is not None else (-cost_all)
         event_time_all = batch.event_time.float() if batch.event_time is not None else None
@@ -190,6 +191,8 @@ class DatasetCollectionManager:
             prev_Q_all = prev_Q_all[perm]
         if state_time_all is not None:
             state_time_all = state_time_all[perm]
+        if xi_all is not None:
+            xi_all = xi_all[perm]
 
         splits = {
             "train": (0, spec.collection.n_steps),
@@ -221,6 +224,7 @@ class DatasetCollectionManager:
             state_time_split = (
                 state_time_all[lo:hi] if state_time_all is not None else None
             )
+            xi_split = xi_all[lo:hi] if xi_all is not None else None
             n = Q_split.shape[0]
             n_shards = max(1, math.ceil(n / spec.collection.shard_size))
 
@@ -241,6 +245,8 @@ class DatasetCollectionManager:
                     shard_data["prev_Q"] = prev_Q_split[s_lo:s_hi]
                 if state_time_split is not None:
                     shard_data["state_time"] = state_time_split[s_lo:s_hi]
+                if xi_split is not None:
+                    shard_data["xi"] = xi_split[s_lo:s_hi]
                 if network_all is not None:
                     shard_data["network"] = network_all
                 if mu_matrix_all is not None:
@@ -302,11 +308,14 @@ class DatasetCollectionManager:
             ),
             "collection_duration_s": round(elapsed, 2),
             "git_commit": commit,
+            "collection_mode": "override" if registry_status != "match" else "registry",
             "mean_Q": round(mean_Q, 4),
             "std_Q": round(std_Q, 4),
             "min_Q": round(min_Q, 4),
             "max_Q": round(max_Q, 4),
             "mean_cost": round(mean_cost, 4),
+            "context_dim": int(xi_all.shape[-1]) if xi_all is not None else 0,
+            "has_context": bool(xi_all is not None),
             "has_transition_data": bool(
                 batch.reward is not None
                 or batch.event_time is not None
@@ -322,6 +331,7 @@ class DatasetCollectionManager:
                 "action",
                 "prev_Q",
                 "state_time",
+                "xi",
                 "network",
                 "mu_matrix",
                 "queue_event_options",
@@ -387,8 +397,10 @@ class DatasetCollectionManager:
 
             ds = QGymDataset(str(dataset_dir), split=split)
             # Verify first and last item
-            q0, mu0, cost0 = ds[0]
-            q_last, mu_last, cost_last = ds[len(ds) - 1]
+            first = ds[0]
+            last = ds[len(ds) - 1]
+            q0, mu0, cost0 = first[:3]
+            q_last, mu_last, cost_last = last[:3]
 
             assert q0.dim() == 1, f"Expected 1-D Q, got {q0.shape}"
             assert cost0.dim() == 0, f"Expected scalar cost, got {cost0.shape}"

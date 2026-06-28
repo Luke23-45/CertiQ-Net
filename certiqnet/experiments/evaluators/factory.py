@@ -84,8 +84,6 @@ def build_model(cfg: DictConfig, N: int, d_xi: int = 0) -> torch.nn.Module:
     if target.endswith("CertiQIndexModel"):
         token_layers = int(model_data.get("token_layers", model_data.get("encoder_layers", 2)))
         global_layers = int(model_data.get("global_layers", model_data.get("encoder_layers", 2)))
-        candidate_top_k = model_data.get("candidate_top_k", None)
-        gate_hidden_dim = int(model_data.get("gate_hidden_dim", 32))
         return CertiQIndexModel(
             N=N,
             hidden_dim=int(model_data.get("hidden_dim", 64)),
@@ -97,8 +95,6 @@ def build_model(cfg: DictConfig, N: int, d_xi: int = 0) -> torch.nn.Module:
             token_layers=token_layers,
             global_layers=global_layers,
             dropout=float(model_data.get("dropout", 0.0)),
-            candidate_top_k=None if candidate_top_k is None else int(candidate_top_k),
-            gate_hidden_dim=gate_hidden_dim,
             cost_fn=str(model_data.get("cost_fn", "qmd")),
             certificate_mode=str(model_data.get("certificate_mode", "exact")),
             constraint_mode=str(model_data.get("constraint_mode", "exact")),

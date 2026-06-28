@@ -192,6 +192,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
         data_init_args.setdefault("N", N)
         dm = QGymDataModule(mu=mu, **data_init_args)
         dm.datatype = datatype
+        dm.context_dim = max(int(getattr(dm, "context_dim", 0)), d_xi)
 
         ds_name = getattr(dm, "dataset_name", None)
         ds_path = getattr(dm, "dataset_path", None)

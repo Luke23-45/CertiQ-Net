@@ -44,6 +44,7 @@ except ModuleNotFoundError:  # pragma: no cover
 from certiqnet.adapters.qgym.adapter import QGymAdapter
 from certiqnet.adapters.qgym.env_loader import compute_queue_holding_cost
 from certiqnet.data.collection_manager import DatasetCollectionManager
+from certiqnet.data.qgym.context import build_qgym_context, QGYM_CONTEXT_DIM
 from certiqnet.data.qgym.dataset import QGymDataset
 from certiqnet.data.registry import DatasetRegistry
 from certiqnet.data.common.state_bank import (
@@ -190,6 +191,53 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         self.val_ds: TensorDataset | None = None
         self.test_ds: TensorDataset | None = None
         self._policy_buffer: deque[Tensor] = deque(maxlen=self.policy_buffer_max)
+
+    def _unpack_sample(self, sample: tuple[Tensor, ...]) -> tuple[Tensor, Tensor, Tensor | None, Tensor]:
+        if len(sample) == 4:
+            Q, mu, cost, xi = sample
+            return Q, mu, xi, cost
+        if len(sample) == 3:
+            Q, mu, cost = sample
+            return Q, mu, None, cost
+        raise ValueError(f"Unexpected sample length: {len(sample)}")
+
+    def _context_dim_from_data(self) -> int:
+        if self.context_dim > 0:
+            return self.context_dim
+        if self._qgym_train_ds is not None and getattr(self._qgym_train_ds, "context_dim", 0) > 0:
+            return int(self._qgym_train_ds.context_dim)
+        if self._qgym_test_ds is not None and getattr(self._qgym_test_ds, "context_dim", 0) > 0:
+            return int(self._qgym_test_ds.context_dim)
+        return 0
+
+    def _ensure_context(
+        self,
+        Q: Tensor,
+        mu: Tensor,
+        xi: Tensor | None = None,
+        *,
+        network: Tensor | None = None,
+        history_Q: list[Tensor] | None = None,
+        history_action: list[Tensor] | None = None,
+        history_dt: list[Tensor] | None = None,
+    ) -> Tensor | None:
+        ctx_dim = self._context_dim_from_data()
+        if ctx_dim <= 0:
+            return None
+        if xi is not None:
+            if xi.dim() == 2 and xi.shape[-1] == ctx_dim:
+                return xi.float()
+            if xi.dim() == 3 and xi.shape[-1] == ctx_dim:
+                return xi.float()
+        return build_qgym_context(
+            Q,
+            mu,
+            history_Q=history_Q,
+            history_action=history_action,
+            history_dt=history_dt,
+            network=network,
+            context_dim=ctx_dim if ctx_dim > 0 else QGYM_CONTEXT_DIM,
+        )
 
     # ── Compatibility properties ──────────────────────────────────────
 
@@ -345,15 +393,15 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
 
         if self._static:
             val_ds = QGymDataset(str(self.dataset_path), split="valid")
+            self.context_dim = max(self.context_dim, int(getattr(val_ds, "context_dim", 0)))
             n_val = min(len(val_ds), n_val)
-            val_Q = torch.stack([val_ds[i][0] for i in range(n_val)])
-            val_mu = (
-                val_ds.mu.unsqueeze(0).expand(n_val, -1)
-                if val_ds.mu is not None
-                else self.mu.unsqueeze(0).expand(n_val, -1)
-            )
+            rows = [self._unpack_sample(val_ds[i]) for i in range(n_val)]
+            val_Q = torch.stack([row[0] for row in rows])
+            val_mu = torch.stack([row[1] for row in rows])
+            val_xi = torch.stack([row[2] for row in rows]) if rows and rows[0][2] is not None else None
+            val_xi = self._ensure_context(val_Q, val_mu, val_xi, network=getattr(val_ds, "network", None))
             val_cost = self._compute_cost(val_Q)
-            self.val_ds = TensorDataset(val_Q, val_mu, val_cost)
+            self.val_ds = TensorDataset(val_Q, val_mu, val_xi, val_cost) if val_xi is not None else TensorDataset(val_Q, val_mu, val_cost)
 
         elif self._online:
             val_gen = torch.Generator().manual_seed(self.seed + 1)
@@ -364,7 +412,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
                 generator=val_gen,
             )
             val_cost = self._compute_cost(val.Q.float())
-            self.val_ds = TensorDataset(val.Q.float(), val.mu.float(), val_cost)
+            self.val_ds = TensorDataset(val.Q.float(), val.mu.float(), val.xi.float(), val_cost) if val.xi is not None else TensorDataset(val.Q.float(), val.mu.float(), val_cost)
 
         else:
             # Pure-synthetic fallback (should not normally be reached for QGym)
@@ -374,7 +422,8 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             ).float()
             mu = self.mu.unsqueeze(0).expand(Q.shape[0], -1)
             cost = self._compute_cost(Q)
-            self.val_ds = TensorDataset(Q, mu, cost)
+            xi = self._ensure_context(Q, mu)
+            self.val_ds = TensorDataset(Q, mu, xi, cost) if xi is not None else TensorDataset(Q, mu, cost)
 
     def _setup_train_source(self) -> None:
         """Load the static training dataset (if applicable)."""
@@ -386,6 +435,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             # regardless of what the experiment env config specifies.
             if self._qgym_train_ds.mu is not None:
                 self.mu = self._qgym_train_ds.mu
+            self.context_dim = max(self.context_dim, int(getattr(self._qgym_train_ds, "context_dim", 0)))
             self.N = self._qgym_train_ds.N
 
     def _setup_test(self) -> None:
@@ -394,15 +444,15 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             test_dir = Path(str(self.dataset_path)) / "test"
             if test_dir.exists() and any(test_dir.glob("*.pt")):
                 test_ds = QGymDataset(str(self.dataset_path), split="test")
+                self.context_dim = max(self.context_dim, int(getattr(test_ds, "context_dim", 0)))
                 n_test = len(test_ds)
-                test_Q = torch.stack([test_ds[i][0] for i in range(n_test)])
-                test_mu = (
-                    test_ds.mu.unsqueeze(0).expand(n_test, -1)
-                    if test_ds.mu is not None
-                    else self.mu.unsqueeze(0).expand(n_test, -1)
-                )
+                rows = [self._unpack_sample(test_ds[i]) for i in range(n_test)]
+                test_Q = torch.stack([row[0] for row in rows])
+                test_mu = torch.stack([row[1] for row in rows])
+                test_xi = torch.stack([row[2] for row in rows]) if rows and rows[0][2] is not None else None
+                test_xi = self._ensure_context(test_Q, test_mu, test_xi, network=getattr(test_ds, "network", None))
                 test_cost = self._compute_cost(test_Q)
-                self.test_ds = TensorDataset(test_Q, test_mu, test_cost)
+                self.test_ds = TensorDataset(test_Q, test_mu, test_xi, test_cost) if test_xi is not None else TensorDataset(test_Q, test_mu, test_cost)
                 self._qgym_test_ds = test_ds
                 return
 
@@ -465,11 +515,8 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
                 generator=gen,
             )
             qgym_q = batch.Q.float()
-            qgym_mu = (
-                batch.mu.float()
-                if batch.mu is not None
-                else self.mu.unsqueeze(0).expand(easy_qgym_count, -1)
-            )
+            qgym_mu = batch.mu.float() if batch.mu is not None else self.mu.unsqueeze(0).expand(easy_qgym_count, -1)
+            qgym_xi = batch.xi.float() if batch.xi is not None else None
         elif (
             self._static
             and self._qgym_train_ds is not None
@@ -478,12 +525,14 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             n = min(easy_qgym_count, len(self._qgym_train_ds))
             idx = torch.randperm(len(self._qgym_train_ds), generator=gen)[:n]
             rows = [self._qgym_train_ds[int(i)] for i in idx]
-            qgym_q = torch.stack([r[0] for r in rows])
-            mu_val = rows[0][1]
-            qgym_mu = mu_val.reshape(1, -1).expand(n, -1)
+            unpacked = [self._unpack_sample(r) for r in rows]
+            qgym_q = torch.stack([r[0] for r in unpacked])
+            qgym_mu = torch.stack([r[1] for r in unpacked])
+            qgym_xi = torch.stack([r[2] for r in unpacked]) if unpacked and unpacked[0][2] is not None else None
         else:
             qgym_q = torch.empty(0, self.N)
             qgym_mu = torch.empty(0, self.N)
+            qgym_xi = None
 
         # ── Replay buffers ───────────────────────────────────────────
         policy_states = self._sample_rows(
@@ -551,12 +600,37 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             dim=0,
         )
         cost = self._compute_cost(Q)
+        network = None
+        if self.qgym_adapter is not None:
+            network = self.qgym_adapter.env_network
+        elif self._qgym_train_ds is not None:
+            network = getattr(self._qgym_train_ds, "network", None)
 
-        if self.context_dim > 0:
-            xi = torch.zeros(Q.shape[0], self.N, self.context_dim)
-            tensors = (Q, mu, xi, cost)
-        else:
-            tensors = (Q, mu, cost)
+        xi_parts: list[Tensor] = []
+        offset = 0
+        source_specs = [
+            (qgym_q, qgym_mu, qgym_xi),
+            (hard_states.float(), self.mu.unsqueeze(0).expand(hard_states.shape[0], -1), None),
+            (disagreement_states.float(), self.mu.unsqueeze(0).expand(disagreement_states.shape[0], -1), None),
+            (policy_states.float(), self.mu.unsqueeze(0).expand(policy_states.shape[0], -1), None),
+            (adversarial_states.float(), self.mu.unsqueeze(0).expand(adversarial_states.shape[0], -1), None),
+        ]
+        for q_part, mu_part, xi_part in source_specs:
+            if q_part.numel() == 0:
+                continue
+            if xi_part is not None:
+                xi_parts.append(xi_part.float())
+            else:
+                xi_parts.append(
+                    self._ensure_context(
+                        q_part.float(),
+                        mu_part.float(),
+                        network=network,
+                    )
+                )
+            offset += q_part.shape[0]
+        xi = torch.cat(xi_parts, dim=0) if xi_parts else None
+        tensors = (Q, mu, xi, cost) if xi is not None else (Q, mu, cost)
 
         if self.train_ds is None:
             self.train_ds = TensorDataset(*tensors)

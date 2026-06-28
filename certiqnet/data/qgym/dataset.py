@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 _REQUIRED_SHARD_KEYS = frozenset({"Q", "cost"})
 _OPTIONAL_1D_KEYS = frozenset({"reward", "event_time", "state_time"})
 _OPTIONAL_2D_KEYS = frozenset({"prev_Q"})
-_OPTIONAL_3D_KEYS = frozenset({"action"})
+_OPTIONAL_3D_KEYS = frozenset({"action", "xi"})
 
 
 class QGymDataset(Dataset):
@@ -52,6 +52,8 @@ class QGymDataset(Dataset):
         self._total_size: int = 0
         self._mu: Tensor | None = None
         self._h: Tensor | None = None
+        self._context_dim: int = 0
+        self._network: Tensor | None = None
 
         split_dir = self._dataset_dir / split
         if not split_dir.exists():
@@ -71,6 +73,8 @@ class QGymDataset(Dataset):
             shard_size = data["Q"].shape[0]
             cumulative += shard_size
             self._cumulative_sizes.append(cumulative)
+            if self._context_dim == 0 and "xi" in data and data["xi"].dim() >= 3:
+                self._context_dim = data["xi"].shape[-1]
 
         self._total_size = cumulative
 
@@ -81,6 +85,8 @@ class QGymDataset(Dataset):
                 self._mu = first["mu"]
             if "h" in first:
                 self._h = first["h"]
+            if "network" in first:
+                self._network = first["network"]
 
         log.info(
             "QGymDataset loaded: split=%s, shards=%d, total=%d, N=%d",
@@ -159,8 +165,8 @@ class QGymDataset(Dataset):
     def __len__(self) -> int:
         return self._total_size
 
-    def __getitem__(self, idx: int) -> tuple[Tensor, Tensor, Tensor]:
-        """Return ``(Q, mu, cost)`` for the given global index.
+    def __getitem__(self, idx: int) -> tuple[Tensor, Tensor, Tensor] | tuple[Tensor, Tensor, Tensor, Tensor]:
+        """Return ``(Q, mu, cost)`` or ``(Q, mu, cost, xi)`` for the given global index.
 
         Notes
         -----
@@ -186,6 +192,8 @@ class QGymDataset(Dataset):
         Q = data["Q"][local_idx]
         cost = data["cost"][local_idx]
         mu = data["mu"] if "mu" in data else (self._mu if self._mu is not None else torch.ones(Q.shape[-1]))
+        if "xi" in data:
+            return Q, mu, cost, data["xi"][local_idx]
         return Q, mu, cost
 
     # ── Properties ────────────────────────────────────────────────────
@@ -201,11 +209,21 @@ class QGymDataset(Dataset):
         return self._h
 
     @property
+    def network(self) -> Tensor | None:
+        """Server-queue topology matrix, if persisted in the shards."""
+        return self._network
+
+    @property
     def N(self) -> int:
         """Number of queues (from the first shard's Q shape)."""
         if self._shards:
             return self._shards[0]["Q"].shape[-1]
         return 0
+
+    @property
+    def context_dim(self) -> int:
+        """Context width stored in the shard, if present."""
+        return self._context_dim
 
     @property
     def split(self) -> str:

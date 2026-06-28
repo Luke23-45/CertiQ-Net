@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
+from collections import deque
 from pathlib import Path
 from typing import Literal
 
@@ -24,6 +25,7 @@ from certiqnet.adapters.qgym.env_loader import (
     compute_queue_holding_cost,
     load_qgym_env,
 )
+from certiqnet.data.qgym.context import QGYM_CONTEXT_DIM, build_qgym_context
 
 log = logging.getLogger(__name__)
 
@@ -171,7 +173,8 @@ class QGymAdapter(DispatchAdapter):
     """
 
     CERTIFICATE_STATUS: str = "approximate"
-    context_dim: int = 0
+    context_dim: int = QGYM_CONTEXT_DIM
+    history_window: int = 4
 
     def __init__(
         self,
@@ -538,11 +541,15 @@ class QGymAdapter(DispatchAdapter):
 
         Q_list: list[Tensor] = []
         prev_Q_list: list[Tensor] = []
+        xi_list: list[Tensor] = []
         cost_list: list[Tensor] = []
         reward_list: list[Tensor] = []
         event_time_list: list[Tensor] = []
         action_list: list[Tensor] = []
         state_time_list: list[Tensor] = []
+        history_Q = [deque(maxlen=self.history_window) for _ in range(max(1, self._batch_size_env))]
+        history_action = [deque(maxlen=self.history_window) for _ in range(max(1, self._batch_size_env))]
+        history_dt = [deque(maxlen=self.history_window) for _ in range(max(1, self._batch_size_env))]
 
         pbar = tqdm(
             total=n_samples,
@@ -576,6 +583,8 @@ class QGymAdapter(DispatchAdapter):
         try:
             obs, _ = env.reset()
             obs_batch = _as_obs_batch(obs)
+            for idx in range(obs_batch.shape[0]):
+                history_Q[idx].append(obs_batch[idx].reshape(-1))
             collected = 0
             while collected < n_samples:
                 batch_now = obs_batch.shape[0]
@@ -607,10 +616,27 @@ class QGymAdapter(DispatchAdapter):
                     else None
                 )
 
+                for idx in range(batch_now):
+                    if idx < next_obs_batch.shape[0]:
+                        history_Q[idx].append(next_obs_batch[idx].reshape(-1))
+                        history_action[idx].append(action_batch[idx].detach().cpu())
+                        history_dt[idx].append(event_time_batch[idx].reshape(-1).squeeze())
+
                 batch_take = min(n_samples - collected, next_obs_batch.shape[0])
                 for idx in range(batch_take):
                     Q_list.append(next_obs_batch[idx].reshape(-1))
                     prev_Q_list.append(prev_Q_batch[idx].reshape(-1))
+                    xi_list.append(
+                        build_qgym_context(
+                            next_obs_batch[idx].unsqueeze(0),
+                            mu_effective.unsqueeze(0),
+                            history_Q=list(history_Q[idx]),
+                            history_action=list(history_action[idx]),
+                            history_dt=list(history_dt[idx]),
+                            network=torch.tensor(network_np, dtype=torch.float),
+                            context_dim=self.context_dim,
+                        )[0]
+                    )
                     cost_list.append(cost_batch[idx].reshape(-1).squeeze())
                     reward_list.append(reward_batch[idx].reshape(-1).squeeze())
                     event_time_list.append(
@@ -626,6 +652,11 @@ class QGymAdapter(DispatchAdapter):
                 if _to_bool(done) or _to_bool(truncated):
                     obs, _ = env.reset()
                     obs_batch = _as_obs_batch(obs)
+                    for idx in range(obs_batch.shape[0]):
+                        history_Q[idx].clear()
+                        history_action[idx].clear()
+                        history_dt[idx].clear()
+                        history_Q[idx].append(obs_batch[idx].reshape(-1))
                 else:
                     obs_batch = next_obs_batch
         finally:
@@ -638,12 +669,13 @@ class QGymAdapter(DispatchAdapter):
         event_time_t = torch.stack(event_time_list)
         action_t = torch.stack(action_list)
         state_time_t = torch.stack(state_time_list) if state_time_list else None
+        xi_t = torch.stack(xi_list) if xi_list else None
         mu_b = mu_effective.unsqueeze(0).expand(Q.shape[0], -1)
 
         return AdapterBatch(
             Q=Q,
             mu=mu_b,
-            xi=None,
+            xi=xi_t,
             cost=cost_t,
             reward=reward_t,
             event_time=event_time_t,
@@ -669,6 +701,7 @@ class QGymAdapter(DispatchAdapter):
 
         Q_parts: list[Tensor] = []
         cost_parts: list[Tensor] = []
+        xi_parts: list[Tensor] = []
         mu_ref: Tensor | None = None
         remaining = n_samples
 
@@ -677,8 +710,23 @@ class QGymAdapter(DispatchAdapter):
             total = data["Q"].shape[0]
             take = min(total, remaining)
             idx = torch.randperm(total, generator=generator)[:take]
-            Q_parts.append(data["Q"][idx])
-            cost_parts.append(data["cost"][idx])
+            Q_chunk = data["Q"][idx]
+            cost_chunk = data["cost"][idx]
+            Q_parts.append(Q_chunk)
+            cost_parts.append(cost_chunk)
+            xi_chunk = data.get("xi")
+            mu_chunk = data.get("mu", mu_ref if mu_ref is not None else torch.ones(Q_chunk.shape[-1]))
+            if xi_chunk is not None:
+                xi_parts.append(xi_chunk[idx])
+            else:
+                xi_parts.append(
+                    build_qgym_context(
+                        Q_chunk,
+                        mu_chunk.unsqueeze(0).expand(Q_chunk.shape[0], -1) if mu_chunk.dim() == 1 else mu_chunk,
+                        network=self.env_network,
+                        context_dim=self.context_dim,
+                    )
+                )
             if mu_ref is None and "mu" in data:
                 mu_ref = data["mu"]
             remaining -= take
@@ -687,17 +735,20 @@ class QGymAdapter(DispatchAdapter):
 
         Q = torch.cat(Q_parts, dim=0)
         cost = torch.cat(cost_parts, dim=0)
+        xi = torch.cat(xi_parts, dim=0) if xi_parts else None
 
         if mu_ref is not None:
             mu_b = mu_ref.unsqueeze(0).expand(n_samples, -1)
         else:
             # Fallback: uniform unit rates
             mu_b = torch.ones(n_samples, Q.shape[-1])
+        if xi is not None:
+            xi = xi[:n_samples]
 
         return AdapterBatch(
             Q=Q,
             mu=mu_b,
-            xi=None,
+            xi=xi,
             cost=cost,
             reward=-cost,
             next_Q=Q.clone(),
@@ -707,11 +758,17 @@ class QGymAdapter(DispatchAdapter):
 
     def make_observation(
         self, Q: Tensor, mu: Tensor
-    ) -> tuple[Tensor, Tensor, None]:
+    ) -> tuple[Tensor, Tensor, Tensor]:
         """Return tensors ready for a CertiQ-Net forward pass."""
         if mu.dim() == 1:
             mu = mu.unsqueeze(0).expand(Q.shape[0], -1)
-        return Q, mu, None
+        xi = build_qgym_context(
+            Q,
+            mu,
+            network=self.env_network,
+            context_dim=self.context_dim,
+        )
+        return Q, mu, xi
 
     # ── Debugging ─────────────────────────────────────────────────────
 

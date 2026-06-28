@@ -98,6 +98,12 @@ def cmd_collect(args: argparse.Namespace) -> None:
         print(f"Available: {', '.join(registry.list_datasets())}")
         sys.exit(1)
 
+    if args.trust_override and args.n_steps is None:
+        print(
+            "[collect] warning: --trust-override has no effect without --n-steps; "
+            "the collected dataset will still follow the registry spec."
+        )
+
     spec = registry.get(name)
     if args.n_steps is not None:
         from certiqnet.data.registry import CollectionConfig, DatasetSpec
@@ -118,6 +124,12 @@ def cmd_collect(args: argparse.Namespace) -> None:
             ),
             training_defaults=spec.training_defaults,
         )
+        if args.trust_override:
+            print(
+                "[collect] warning: trust-override requested; the collected dataset "
+                "will be annotated as an override/mismatch and must not be treated "
+                "as registry-default data."
+            )
     output = manager.collect(spec, force=args.force, skip_verify=args.no_verify)
     if args.n_steps is not None:
         meta_path = Path(output) / "metadata.yaml"
