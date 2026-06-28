@@ -47,7 +47,7 @@ class DatatypeTrainerConfig:
     weight_decay: float = MISSING
     rollout_horizon: int = MISSING
     imitation_warmup_epochs: int = MISSING
-    expert_mode: str = MISSING
+    expert_mode: str | None = None
     gamma: float = MISSING
     val_horizon_max: int = MISSING
 

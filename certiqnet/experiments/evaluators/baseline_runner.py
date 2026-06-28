@@ -62,7 +62,7 @@ def _greedy_pi(pi: torch.Tensor) -> torch.Tensor:
 class RolloutConfig:
     """Rollout settings for local and cloud comparisons."""
 
-    steps: int = 1000
+    steps: int = 2000
     batch_size: int = 32
     max_backlog: float = 1e6
     show_progress: bool = True

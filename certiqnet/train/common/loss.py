@@ -38,14 +38,19 @@ class CertiQNetLoss(nn.Module):
         total_time = weights.sum().clamp_min(1e-9)
         return (cost_trace * weights).sum() / total_time
 
-    def action_loss(self, logits: Tensor, target: Tensor) -> Tensor:
+    def action_loss(self, logits: Tensor, target: Tensor | None = None) -> Tensor:
         """Cross-entropy :math:`\\mathcal L_{\\mathrm{ce}}` between
-        proposal logits and QMD expert action."""
+        proposal logits and expert action.  Returns 0 when no expert."""
+        if target is None:
+            return torch.zeros((), device=logits.device, dtype=logits.dtype)
         return F.cross_entropy(logits, target.to(device=logits.device, dtype=torch.long))
 
-    def margin_loss(self, logits: Tensor, target: Tensor) -> Tensor:
+    def margin_loss(self, logits: Tensor, target: Tensor | None = None) -> Tensor:
         """Margin ranking loss :math:`\\mathcal L_{\\mathrm{margin}}`:
-        encourages the expert logit to exceed the runner-up by at least 1."""
+        encourages the expert logit to exceed the runner-up by at least 1.
+        Returns 0 when no expert."""
+        if target is None:
+            return torch.zeros((), device=logits.device, dtype=logits.dtype)
         target = target.to(device=logits.device, dtype=torch.long)
         target_logit = logits.gather(1, target.unsqueeze(-1)).squeeze(-1)
         masked = logits.clone()
@@ -68,8 +73,8 @@ class CertiQNetLoss(nn.Module):
     def forward(
         self,
         proposal_logits: Tensor,
-        action_target: Tensor,
         p_cert: Tensor,
+        action_target: Tensor | None = None,
         rollout_log_probs: Tensor | None = None,
         rollout_returns: Tensor | None = None,
     ) -> dict[str, Tensor]:

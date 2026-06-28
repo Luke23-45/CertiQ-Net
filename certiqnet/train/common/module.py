@@ -39,8 +39,14 @@ def _stack_mean(diags: list[DispatcherDiagnostics]) -> DispatcherDiagnostics:
 class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Module):
     """Base Lightning wrapper with the formal 5-term objective.
 
-    Additive curriculum:
-        1. Train proposal against QMD targets (CE + margin + entropy + KL)
+    ``expert_mode`` controls imitation learning against an analytical
+    dispatcher:
+        * ``"qmd"`` — QMD targets (CE + margin + entropy + KL)
+        * ``"sed"`` — SED targets
+        * ``None`` — no imitation (only rollout + entropy + KL)
+
+    When imitation is enabled the curriculum is additive:
+        1. Train proposal against expert targets (CE + margin + entropy + KL)
         2. Add rollout-cost optimization via simple REINFORCE
 
     The certificate layer is part of every forward pass (it defines the
@@ -56,7 +62,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         weight_decay: float = 1e-5,
         rollout_horizon: int = 16,
         imitation_warmup_epochs: int = 20,
-        expert_mode: str = "qmd",
+        expert_mode: str | None = None,
         lam: float = 1.0,
         gamma: float = 0.99,
         val_horizon_max: int = 64,
@@ -81,16 +87,17 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         if dm is not None and hasattr(dm, "resample_train_data"):
             dm.resample_train_data()
 
-    def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor:
+    def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor | None:
+        if self.expert_mode is None:
+            return None
         if mu.dim() == 1:
             mu = mu.unsqueeze(0).expand(Q.shape[0], -1)
         mu_safe = mu.clamp_min(mu.new_tensor(1e-12))
         if self.expert_mode == "sed":
             return sed_index(Q, mu_safe).argmin(dim=-1)
-        elif self.expert_mode == "qmd":
+        if self.expert_mode == "qmd":
             return quadratic_drift_index(Q, mu_safe).argmin(dim=-1)
-        else:
-            raise ValueError(f"Unknown expert_mode: {self.expert_mode}")
+        raise ValueError(f"Unknown expert_mode: {self.expert_mode}")
 
     # ── Domain hook ─────────────────────────────────────────────────
 
@@ -121,8 +128,18 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self._log_diagnostics(init_out.diagnostics, "train")
 
         epoch = int(getattr(self.trainer, "current_epoch", 0))
-        if epoch >= self.imitation_warmup_epochs:
-            # Additive curriculum: rollout-cost optimization via REINFORCE
+        has_imitation = expert_action is not None
+        in_imitation_phase = has_imitation and epoch < self.imitation_warmup_epochs
+
+        if in_imitation_phase:
+            losses = self.loss_fn(
+                proposal_logits=init_out.proposal_logits,
+                action_target=expert_action,
+                p_cert=init_out.p_cert,
+            )
+        else:
+            # Rollout-cost optimization via REINFORCE
+            # (imitation losses still computed inside loss_fn when expert_action is not None)
             N = int(Q0.shape[-1])
             env = CTMCEnvironment(N=N, lam=self.lam, mu=mu0[0], B=Q0.shape[0])
             env.reset(Q0.detach().clone())
@@ -166,12 +183,6 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 rollout_log_probs=log_probs_t.reshape(-1),
                 rollout_returns=returns.reshape(-1),
             )
-        else:
-            losses = self.loss_fn(
-                proposal_logits=init_out.proposal_logits,
-                action_target=expert_action,
-                p_cert=init_out.p_cert,
-            )
 
         for key, value in losses.items():
             self.log(key, value, on_step=True, on_epoch=True, prog_bar=(key == "total"))
@@ -179,7 +190,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         if dm is not None:
             if hasattr(dm, "record_policy_states"):
                 dm.record_policy_states(Q0.detach().to("cpu", non_blocking=True))
-            if hasattr(dm, "record_teacher_states"):
+            if expert_action is not None and hasattr(dm, "record_teacher_states"):
                 dm.record_teacher_states(Q0.detach().to("cpu", non_blocking=True))
 
         return losses["total"]
