@@ -48,6 +48,7 @@ class DatatypeTrainerConfig:
     weight_decay: float = MISSING
     rollout_horizon: int = MISSING
     use_ppo: bool = MISSING
+    supervised_only: bool = MISSING
     ppo_epochs: int = MISSING
     ppo_clip_epsilon: float = MISSING
     ppo_manual_clip_val: float = MISSING

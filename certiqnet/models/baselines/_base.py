@@ -50,8 +50,12 @@ def make_lagrangian_diagnostics(
         pressure_mean=torch.zeros_like(nan),
         pressure_max=torch.zeros_like(nan),
         pressure_update_norm=torch.zeros_like(nan),
+        projection_multiplier=torch.zeros_like(nan),
+        projection_active=torch.zeros_like(nan),
+        solver_status=torch.zeros_like(nan),
+        fallback_flag=torch.zeros_like(nan),
+        correction_magnitude=torch.zeros_like(nan),
     )
-
 
 
 

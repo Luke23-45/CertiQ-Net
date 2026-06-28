@@ -22,13 +22,14 @@ qgym:
     lr: 1.0e-4
     weight_decay: 1.0e-5
     rollout_horizon: 64
-    use_ppo: true
+    use_ppo: false
+    supervised_only: true
     ppo_epochs: 2
     ppo_clip_epsilon: 0.15
     ppo_manual_clip_val: 5.0
-    entropy_warmup_epochs: 20
-    imitation_warmup_epochs: 30
-    critic_bootstrap_epochs: 3
+    entropy_warmup_epochs: 0
+    imitation_warmup_epochs: 0
+    critic_bootstrap_epochs: 0
     imitation_decay_rate: 0.96
     expert_mode: sed
     gamma: 0.99

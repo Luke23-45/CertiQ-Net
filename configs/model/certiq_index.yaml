@@ -7,3 +7,8 @@ model:
   C: 20.0
   beta: 1.0
   cost_fn: qmd
+  token_layers: 2
+  global_layers: 2
+  dropout: 0.0
+  certificate_mode: exact
+  constraint_mode: exact

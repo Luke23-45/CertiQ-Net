@@ -109,14 +109,18 @@ def aggregate_metrics(
     weighted_backlog = (backlog * weights).sum() / total_time
     weighted_cost = (cost_trace * weights).sum() / total_time
     slack = torch.cat([d.certificate_slack.detach().flatten().cpu() for d in diagnostics])
+    proposal_slack = torch.cat(
+        [
+            (d.B_Q.detach() - d.A_proposal.detach()).flatten().cpu()
+            for d in diagnostics
+        ]
+    )
     usage_final = torch.cat([d.usage_final.detach().flatten().cpu() for d in diagnostics])
     finite_usage = usage_final[torch.isfinite(usage_final)]
-    batch_sizes = [d.certificate_slack.detach().flatten().shape[0] for d in diagnostics]
-    fallback = torch.cat([torch.zeros(b, dtype=torch.bool) for b in batch_sizes])
-    projection_active = torch.cat([torch.zeros(b, dtype=torch.bool) for b in batch_sizes])
-    projection_nu = torch.cat([torch.zeros(b) for b in batch_sizes])
-    proposal_slack = slack.clone()
-    correction = torch.cat([torch.zeros(b) for b in batch_sizes])
+    fallback = torch.cat([d.fallback_flag.detach().flatten().cpu().to(torch.bool) for d in diagnostics])
+    projection_active = torch.cat([d.projection_active.detach().flatten().cpu().to(torch.bool) for d in diagnostics])
+    projection_nu = torch.cat([d.projection_multiplier.detach().flatten().cpu() for d in diagnostics])
+    correction = torch.cat([d.correction_magnitude.detach().flatten().cpu() for d in diagnostics])
     pressure_mean = torch.cat([d.pressure_mean.detach().flatten().cpu() for d in diagnostics])
     pressure_max = torch.cat([d.pressure_max.detach().flatten().cpu() for d in diagnostics])
     pressure_update_norm = torch.cat(

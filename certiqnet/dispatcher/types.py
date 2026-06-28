@@ -1,6 +1,8 @@
 """Typed public objects for the z3 CertiQ Dispatcher."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+import torch
 
 from torch import Tensor
 
@@ -25,6 +27,17 @@ class DispatcherDiagnostics:
     pressure_mean: Tensor
     pressure_max: Tensor
     pressure_update_norm: Tensor
+    projection_multiplier: Tensor = field(
+        default_factory=lambda: torch.tensor(float("nan"))
+    )
+    projection_active: Tensor = field(
+        default_factory=lambda: torch.tensor(float("nan"))
+    )
+    solver_status: Tensor = field(default_factory=lambda: torch.tensor(float("nan")))
+    fallback_flag: Tensor = field(default_factory=lambda: torch.tensor(float("nan")))
+    correction_magnitude: Tensor = field(
+        default_factory=lambda: torch.tensor(float("nan"))
+    )
 
 
 @dataclass(frozen=True)

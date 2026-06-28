@@ -64,6 +64,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         target_kl_cert: float = 0.01,
         initial_policy_kl_weight: float = 0.05,
         entropy_weight: float = 0.01,
+        supervised_only: bool = False,
         lam: float = 1.0,
         dual_lambda_lr: float = 0.01,
         dual_lambda_init: float = 0.0,
@@ -92,6 +93,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self.current_kl_weight = initial_policy_kl_weight
         self.epoch_kl_records = []
         self.use_ppo = bool(use_ppo)
+        self.supervised_only = bool(supervised_only)
         self.expert_mode = expert_mode
         self.ppo_epochs = int(ppo_epochs)
         self.ppo_clip_epsilon = float(ppo_clip_epsilon)
@@ -178,6 +180,31 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         dm = getattr(self.trainer, "datamodule", None)
         if hasattr(self.model, "reset_dispatch_state"):
             self.model.reset_dispatch_state()
+        if self.supervised_only:
+            expert_action = sed_action if sed_action is not None else self._collect_expert_actions(Q0, mu0)
+            init_out = self.model.forward_full(Q0, mu0, xi0, training_mode=True)
+            expert_pi = F.one_hot(expert_action, num_classes=int(Q0.shape[-1])).to(
+                device=init_out.pi.device,
+                dtype=init_out.pi.dtype,
+            )
+            losses = self.loss_fn(
+                init_out.p_proposal,
+                imitation_target=expert_pi,
+                action_target=expert_action,
+                ref_pi=init_out.p_cert,
+                policy_logits=init_out.proposal_logits,
+                entropy_weight=self.entropy_weight,
+                use_ppo=False,
+            )
+            for key, value in losses.items():
+                self.log(key, value, on_step=True, on_epoch=True, prog_bar=(key == "total"))
+            self._log_diagnostics(init_out.diagnostics, "train")
+            if dm is not None:
+                if hasattr(dm, "record_policy_states"):
+                    dm.record_policy_states(Q0.detach().to("cpu", non_blocking=True))
+                if hasattr(dm, "record_teacher_states"):
+                    dm.record_teacher_states(Q0.detach().to("cpu", non_blocking=True))
+            return losses["total"]
         expert_action = self._collect_expert_actions(Q0, mu0)
         init_out = self.model.forward_full(Q0, mu0, xi0, training_mode=True)
         expert_pi = F.one_hot(expert_action, num_classes=int(Q0.shape[-1])).to(
@@ -452,7 +479,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             init_mu: Tensor,
             init_xi: Tensor | None,
             horizon: int,
-        ) -> tuple[DispatcherDiagnostics, Tensor, Tensor, Tensor]:
+        ) -> tuple[DispatcherDiagnostics, Tensor, Tensor, Tensor, Tensor]:
             if hasattr(self.model, "reset_dispatch_state"):
                 self.model.reset_dispatch_state()
             env = CTMCEnvironment(
@@ -486,25 +513,28 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             dt_t = torch.cat(dt_trace, dim=0).float()
             avg_cost = self.loss_fn.rollout_cost(cost_t, dt_t)
             p95_backlog = backlog.quantile(0.95)
-            violation = (diag.constraint_violation.mean() > 1e-4).float()
-            return diag, avg_cost, p95_backlog, violation
+            violation = diag.constraint_violation.mean()
+            violation_rate = (diag.constraint_violation > 1e-4).float().mean()
+            return diag, avg_cost, p95_backlog, violation, violation_rate
 
         zero_Q = torch.zeros_like(Q)
-        primary_diag, avg_cost, p95_backlog, violation = _run_rollout(
+        primary_diag, avg_cost, p95_backlog, violation, violation_rate = _run_rollout(
             zero_Q, mu, xi, val_horizon
         )
         selection_score = validation_selection_score(violation, avg_cost, p95_backlog)
         self.log("val/CONSTRAINT_VIOLATION", violation, prog_bar=True)
+        self.log("val/CONSTRAINT_VIOLATION_RATE", violation_rate, prog_bar=False)
         self.log("val/avg_cost", avg_cost, prog_bar=True)
         self.log("val/p95_backlog", p95_backlog, prog_bar=False)
         self.log("val/selection_score", selection_score, prog_bar=False)
         self._log_diagnostics(primary_diag, "val")
 
         if xi is not None or Q.abs().sum().item() > 0:
-            aux_diag, aux_avg_cost, aux_p95_backlog, aux_violation = _run_rollout(
+            aux_diag, aux_avg_cost, aux_p95_backlog, aux_violation, aux_violation_rate = _run_rollout(
                 Q, mu, xi, val_horizon
             )
             self.log("val/dataset_start_CONSTRAINT_VIOLATION", aux_violation, prog_bar=False)
+            self.log("val/dataset_start_CONSTRAINT_VIOLATION_RATE", aux_violation_rate, prog_bar=False)
             self.log("val/dataset_start_avg_cost", aux_avg_cost, prog_bar=False)
             self.log("val/dataset_start_p95_backlog", aux_p95_backlog, prog_bar=False)
             self._log_diagnostics(aux_diag, "val_dataset_start")

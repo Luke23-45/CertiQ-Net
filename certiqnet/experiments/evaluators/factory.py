@@ -82,18 +82,21 @@ def build_model(cfg: DictConfig, N: int, d_xi: int = 0) -> torch.nn.Module:
             N=N, beta=float(model_data.get("beta", 1.0)), C=float(model_data.get("C", float("inf")))
         )
     if target.endswith("CertiQIndexModel"):
+        token_layers = int(model_data.get("token_layers", model_data.get("encoder_layers", 2)))
+        global_layers = int(model_data.get("global_layers", model_data.get("encoder_layers", 2)))
         return CertiQIndexModel(
             N=N,
             hidden_dim=int(model_data.get("hidden_dim", 64)),
-            tau=float(model_data.get("tau", 1.0)), C=float(model_data.get("C", 2.0)),
+            tau=float(model_data.get("tau", 1.0)),
+            C=float(model_data.get("C", 2.0)),
             exploration_temperature=float(model_data.get("exploration_temperature", 1.5)),
             beta=float(model_data.get("beta", 1.0)),
             d_xi=d_xi,
-            encoder_layers=int(model_data.get("encoder_layers", 2)),
-            num_heads=int(model_data.get("num_heads", 4)),
-            num_inducing_points=int(model_data.get("num_inducing_points", 4)),
+            token_layers=token_layers,
+            global_layers=global_layers,
             dropout=float(model_data.get("dropout", 0.0)),
-            cost_fn=str(model_data.get("cost_fn", "sed")),
-            cost_learner_hidden_dim=int(model_data.get("cost_learner_hidden_dim", 64)),
+            cost_fn=str(model_data.get("cost_fn", "qmd")),
+            certificate_mode=str(model_data.get("certificate_mode", "exact")),
+            constraint_mode=str(model_data.get("constraint_mode", "exact")),
         )
     raise ValueError(f"Unsupported model target: {target}")

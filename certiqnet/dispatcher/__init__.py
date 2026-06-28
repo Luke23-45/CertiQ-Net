@@ -15,7 +15,6 @@ from certiqnet.dispatcher.types import (
 from certiqnet.dispatcher.certiq import (
     CertiQIndexModel,
     DispatchInteractionEncoder,
-    MarginalIndexHead,
     CertifiedGeometry,
     CostLearner,
     index_token_features,
@@ -26,7 +25,6 @@ __all__ = [
     "DispatcherDiagnostics",
     "DispatcherForward",
     "DispatchInteractionEncoder",
-    "MarginalIndexHead",
     "CertifiedGeometry",
     "CostLearner",
     "index_token_features",

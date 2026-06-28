@@ -252,6 +252,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             weight_decay=float(trainer_container.get("weight_decay", 1e-5)),
             rollout_horizon=int(trainer_container.get("rollout_horizon", 64)),
             use_ppo=bool(trainer_container.get("use_ppo", True)),
+            supervised_only=bool(trainer_container.get("supervised_only", False)),
             ppo_epochs=int(trainer_container.get("ppo_epochs", 4)),
             ppo_clip_epsilon=float(trainer_container.get("ppo_clip_epsilon", 0.2)),
             ppo_manual_clip_val=float(trainer_container.get("ppo_manual_clip_val", 1.0)),
