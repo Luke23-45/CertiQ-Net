@@ -6,7 +6,7 @@ model:
   exploration_temperature: 1.5
   C: 20.0
   beta: 1.0
-  cost_fn: sed
+  cost_fn: qmd #sed or qmd
   token_layers: 2
   global_layers: 2
   dropout: 0.0
