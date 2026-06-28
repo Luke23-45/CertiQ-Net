@@ -154,6 +154,14 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
                 f"Config must include a '{datatype}' block with data, "
                 "trainer and loss sections."
             )
+        model_profile = profile.get("model", {})
+        model_profile_container = OmegaConf.to_container(model_profile, resolve=True) if model_profile is not None else {}
+        if not isinstance(model_profile_container, dict):
+            model_profile_container = {}
+        if model_profile_container:
+            OmegaConf.set_struct(cfg, False)
+            cfg.model = OmegaConf.merge(cfg.model, OmegaConf.create(model_profile_container))
+            OmegaConf.set_struct(cfg, True)
 
         data_init_args = dict(profile.data.init_args)
         dataset_name = data_init_args.get("dataset_name")
@@ -171,6 +179,8 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             if spec.env_lam is not None
             else float(build_mu(cfg)[1])
         )
+        context_dim = int(model_profile_container.get("context_dim", 0))
+        d_xi = max(d_xi, context_dim)
         model = build_model(cfg, N=N, d_xi=d_xi)
 
         if str(cfg.get("certificate_status", "exact")) == "exact":
@@ -239,6 +249,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             lr=float(trainer_container.get("lr", 3e-4)),
             weight_decay=float(trainer_container.get("weight_decay", 1e-5)),
             rollout_horizon=int(trainer_container.get("rollout_horizon", 64)),
+            context_dim=d_xi,
             lam=float(lam),
             gamma=float(trainer_container.get("gamma", 0.99)),
             val_horizon_max=int(trainer_container.get("val_horizon_max", 64)),

@@ -38,7 +38,8 @@ defaults:
   training_defaults:
     mode: static
     policy_mix_fraction: 0.25
-    hard_state_fraction: 0.75
+    hard_state_fraction: 0.5
+    disagreement_fraction: 0.25
     adversarial_fraction: 0.25
 
 datasets:

@@ -13,6 +13,7 @@ except ModuleNotFoundError:
     pl = None
 
 from certiqnet.dispatcher.types import DispatcherDiagnostics
+from certiqnet.dispatcher.delay_geometry import quadratic_drift_index, sed_index
 from certiqnet.train.common.loss import CertiQNetLoss
 from certiqnet.utils.ctmc import CTMCEnvironment
 
@@ -50,6 +51,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         lr: float = 3e-4,
         weight_decay: float = 1e-5,
         rollout_horizon: int = 16,
+        context_dim: int = 0,
         lam: float = 1.0,
         gamma: float = 0.99,
         val_horizon_max: int = 64,
@@ -61,6 +63,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self.lr = lr
         self.weight_decay = weight_decay
         self.rollout_horizon = int(rollout_horizon)
+        self.context_dim = int(context_dim)
         self.lam = float(lam)
         self.gamma = float(gamma)
         self.val_horizon_max = int(val_horizon_max)
@@ -84,13 +87,43 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         if self.input_normalization == "per_sample":
             col_max = Q.max(dim=-1, keepdim=True).values.clamp(min=1e-8)
             Q = Q / col_max
+        adapter_context_dim = int(getattr(adapter, "context_dim", 0)) if adapter is not None else 0
+        if self.context_dim > 0 and adapter_context_dim == 0:
+            xi = self._build_context_features(Q, mu)
+        elif self.context_dim > 0 and xi is not None and xi.shape[-1] == self.context_dim:
+            if torch.count_nonzero(xi).item() == 0:
+                xi = self._build_context_features(Q, mu)
         return Q, mu, xi
+
+    def _build_context_features(self, Q: Tensor, mu: Tensor) -> Tensor:
+        """Construct per-queue ambiguity features for the residual scorer."""
+        mu_safe = mu.clamp_min(mu.new_tensor(1e-12))
+        qmd = quadratic_drift_index(Q, mu_safe)
+        sed = sed_index(Q, mu_safe)
+        total = Q.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+        queue_share = Q / total
+        qmd_rank = torch.argsort(torch.argsort(qmd, dim=-1), dim=-1).float()
+        sed_rank = torch.argsort(torch.argsort(sed, dim=-1), dim=-1).float()
+        denom = max(Q.shape[-1] - 1, 1)
+        qmd_rank = qmd_rank / denom
+        sed_rank = sed_rank / denom
+        qmd_gap = (qmd - qmd.min(dim=-1, keepdim=True).values) / (qmd.abs().mean(dim=-1, keepdim=True) + 1.0)
+        sed_gap = (sed - sed.min(dim=-1, keepdim=True).values) / (sed.abs().mean(dim=-1, keepdim=True) + 1.0)
+        disagreement = (qmd.argmin(dim=-1) != sed.argmin(dim=-1)).float().unsqueeze(-1).expand_as(Q)
+        features = [queue_share, qmd_rank, sed_rank, qmd_gap, sed_gap, disagreement]
+        xi = torch.stack([f for f in features], dim=-1)
+        if xi.shape[-1] > self.context_dim:
+            xi = xi[..., : self.context_dim]
+        elif xi.shape[-1] < self.context_dim:
+            pad = torch.zeros(*xi.shape[:-1], self.context_dim - xi.shape[-1], device=xi.device, dtype=xi.dtype)
+            xi = torch.cat([xi, pad], dim=-1)
+        return xi
 
     # ── Training step ───────────────────────────────────────────────
 
     def training_step(self, batch: dict[str, Tensor], batch_idx: int) -> Tensor | None:
         del batch_idx
-        Q0, mu0, xi0 = batch["Q"], batch["mu"], batch.get("xi")
+        Q0, mu0, xi0 = self._make_observation(batch["Q"], batch["mu"], batch.get("xi"))
         dm = getattr(self.trainer, "datamodule", None)
         if hasattr(self.model, "reset_dispatch_state"):
             self.model.reset_dispatch_state()
@@ -155,7 +188,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
 
     def validation_step(self, batch: dict[str, Tensor], batch_idx: int) -> None:
         del batch_idx
-        Q, mu, xi = batch["Q"], batch["mu"], batch.get("xi")
+        Q, mu, xi = self._make_observation(batch["Q"], batch["mu"], batch.get("xi"))
         val_horizon = max(self.rollout_horizon, self.val_horizon_max)
 
         def _run_rollout(

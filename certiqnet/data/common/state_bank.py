@@ -6,6 +6,7 @@ import torch
 from torch import Tensor
 
 from certiqnet.data.common.lyapunov import tail_size
+from certiqnet.dispatcher.delay_geometry import quadratic_drift_index, sed_index
 from certiqnet.dispatcher.types import DispatcherDiagnostics
 
 
@@ -90,3 +91,52 @@ def generate_adversarial_states(
         loss.backward()
         opt.step()
     return Q.detach().clamp(min=0).ceil().to(device="cpu")
+
+
+def generate_disagreement_states(
+    *,
+    mu: Tensor,
+    N: int,
+    n_states: int = 100,
+    bank_size: int = 4096,
+    beta: float = 1.0,
+    bank: Tensor | None = None,
+) -> Tensor:
+    """Select states where QMD and SED disagree or are nearly tied.
+
+    The returned states intentionally concentrate training on the
+    ambiguous region where the analytic rules are least certain.
+    """
+    if bank is None:
+        bank = generate_state_bank(
+            N=N,
+            mu=mu,
+            beta=beta,
+            R_cert=float("inf"),
+            n_random=max(bank_size // 2, n_states * 8),
+            n_grid=0,
+            n_boundary=max(64, n_states * 2),
+            n_adversarial=max(64, n_states * 2),
+        )
+    mu_b = _expand_mu(mu, bank.shape[0])
+    qmd = quadratic_drift_index(bank, mu_b)
+    sed = sed_index(bank, mu_b)
+    qmd_choice = qmd.argmin(dim=-1)
+    sed_choice = sed.argmin(dim=-1)
+    disagreement = (qmd_choice != sed_choice).float()
+
+    def _margin(x: Tensor) -> Tensor:
+        top2 = torch.topk(x, k=min(2, x.shape[-1]), largest=False).values
+        if top2.shape[-1] == 1:
+            return torch.zeros_like(top2[:, 0])
+        return top2[:, 1] - top2[:, 0]
+
+    qmd_margin = _margin(qmd)
+    sed_margin = _margin(sed)
+    score = disagreement * 10.0 + (1.0 / (1.0 + qmd_margin + sed_margin))
+    score = score + 1e-3 * bank.sum(dim=-1).float()
+    idx = torch.topk(score, k=min(n_states, bank.shape[0]), largest=True).indices
+    selected = bank[idx]
+    if selected.shape[0] < n_states:
+        selected = selected.repeat((n_states + selected.shape[0] - 1) // selected.shape[0], 1)[:n_states]
+    return selected[:n_states]

@@ -46,7 +46,10 @@ from certiqnet.adapters.qgym.env_loader import compute_queue_holding_cost
 from certiqnet.data.collection_manager import DatasetCollectionManager
 from certiqnet.data.qgym.dataset import QGymDataset
 from certiqnet.data.registry import DatasetRegistry
-from certiqnet.data.common.state_bank import generate_state_bank
+from certiqnet.data.common.state_bank import (
+    generate_disagreement_states,
+    generate_state_bank,
+)
 from certiqnet.utils.platform import resolve_num_workers
 
 log = logging.getLogger(__name__)
@@ -116,6 +119,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         policy_buffer_max: int = 4096,
         policy_mix_fraction: float = 0.25,
         hard_state_fraction: float = 0.5,
+        disagreement_fraction: float = 0.25,
         adversarial_fraction: float = 0.25,
         dataset_path: str | Path | None = None,
         dataset_name: str | None = None,
@@ -144,11 +148,16 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         # ── Validate and store mix fractions ──────────────────────────
         self.policy_mix_fraction = float(policy_mix_fraction)
         self.hard_state_fraction = float(hard_state_fraction)
+        self.disagreement_fraction = float(disagreement_fraction)
         self.adversarial_fraction = float(adversarial_fraction)
 
         if self.policy_mix_fraction > _MAX_MIX_SUM:
             raise ValueError(
                 f"policy_mix_fraction={self.policy_mix_fraction} exceeds 1.0."
+            )
+        if self.hard_state_fraction + self.disagreement_fraction > 1.0 + 1e-6:
+            raise ValueError(
+                "hard_state_fraction + disagreement_fraction must not exceed 1.0."
             )
 
         # ── Mode detection ────────────────────────────────────────────
@@ -301,6 +310,11 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             ):
                 self.hard_state_fraction = float(defaults["hard_state_fraction"])
             if (
+                self.disagreement_fraction == 0.25
+                and "disagreement_fraction" in defaults
+            ):
+                self.disagreement_fraction = float(defaults["disagreement_fraction"])
+            if (
                 self.adversarial_fraction == 0.25
                 and "adversarial_fraction" in defaults
             ):
@@ -435,8 +449,9 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             0.0, 1.0 - self.policy_mix_fraction,
         )
         qgym_count = max(1, int(self.n_samples * qgym_fraction))
-        hard_count = int(qgym_count * self.hard_state_fraction)
-        easy_qgym_count = qgym_count - hard_count
+        hard_count = max(0, int(qgym_count * self.hard_state_fraction))
+        disagreement_count = max(0, int(qgym_count * self.disagreement_fraction))
+        easy_qgym_count = max(0, qgym_count - hard_count - disagreement_count)
 
         policy_count = max(0, int(self.n_samples * self.policy_mix_fraction))
         adversarial_count = max(1, int(self.n_samples * self.adversarial_fraction))
@@ -485,16 +500,33 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             mu=self.mu,
             beta=1.0,
             R_cert=float("inf"),
-            n_random=max(adversarial_count * 4, hard_count * 4),
+            n_random=max(adversarial_count * 4, hard_count * 4, disagreement_count * 4),
             n_grid=0,
             n_boundary=max(64, self.N * 8),
         )
         backlog = bank.sum(dim=-1)
-        k = min(hard_count, bank.shape[0])
-        hard_rank = torch.topk(backlog, k=max(k, 1), largest=True).indices
-        hard_states = bank[hard_rank]
-        if hard_states.shape[0] < hard_count:
-            hard_states = self._sample_rows(hard_states, hard_count, gen)
+        if hard_count > 0:
+            k = min(hard_count, bank.shape[0])
+            hard_rank = torch.topk(backlog, k=max(k, 1), largest=True).indices
+            hard_states = bank[hard_rank]
+            if hard_states.shape[0] < hard_count:
+                hard_states = self._sample_rows(hard_states, hard_count, gen)
+        else:
+            hard_states = torch.empty(0, self.N)
+
+        if disagreement_count > 0:
+            disagreement_states = generate_disagreement_states(
+                mu=self.mu,
+                N=self.N,
+                n_states=disagreement_count,
+                bank_size=max(1024, disagreement_count * 16),
+                beta=1.0,
+                bank=bank,
+            )
+            if disagreement_states.shape[0] < disagreement_count:
+                disagreement_states = self._sample_rows(disagreement_states, disagreement_count, gen)
+        else:
+            disagreement_states = torch.empty(0, self.N)
         adversarial_states = self._sample_rows(bank, adversarial_count, gen)
 
         # ── Concatenate all sources ──────────────────────────────────
@@ -502,6 +534,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             [
                 qgym_q,
                 hard_states.float(),
+                disagreement_states.float(),
                 policy_states.float(),
                 adversarial_states.float(),
             ],
@@ -511,6 +544,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             [
                 qgym_mu,
                 self.mu.unsqueeze(0).expand(hard_states.shape[0], -1),
+                self.mu.unsqueeze(0).expand(disagreement_states.shape[0], -1),
                 self.mu.unsqueeze(0).expand(policy_states.shape[0], -1),
                 self.mu.unsqueeze(0).expand(adversarial_states.shape[0], -1),
             ],

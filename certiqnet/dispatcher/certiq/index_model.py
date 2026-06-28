@@ -128,6 +128,8 @@ class CertiQIndexModel(nn.Module):
         token_layers: int = 2,
         global_layers: int = 2,
         dropout: float = 0.0,
+        candidate_top_k: int | None = None,
+        gate_hidden_dim: int = 32,
         certificate_mode: str | None = None,
         constraint_mode: str = "exact",
     ) -> None:
@@ -140,6 +142,7 @@ class CertiQIndexModel(nn.Module):
         self.cost_fn = str(cost_fn)
         self.d_xi = int(d_xi)
         self.constraint_mode = str(constraint_mode)
+        self.candidate_top_k = None if candidate_top_k is None else max(0, int(candidate_top_k))
         if certificate_mode is None:
             self.certificate_mode = "exact" if self.constraint_mode in {"exact", "projection", "lagrangian"} else "none"
         else:
@@ -150,6 +153,11 @@ class CertiQIndexModel(nn.Module):
             token_layers=token_layers,
             global_layers=global_layers,
             dropout=dropout,
+        )
+        self.gate_head = nn.Sequential(
+            nn.Linear(11 + 4, gate_hidden_dim),
+            nn.GELU(),
+            nn.Linear(gate_hidden_dim, 1),
         )
 
     def reset_dispatch_state(self) -> None:
@@ -162,6 +170,49 @@ class CertiQIndexModel(nn.Module):
             return sed_index(Q, mu)
         raise ValueError(f"Unknown cost_fn: {self.cost_fn}")
 
+    def _resolve_context(self, Q: Tensor, mu: Tensor, xi: Tensor | None) -> Tensor | None:
+        if self.d_xi <= 0:
+            return None
+        if xi is not None and xi.shape[-1] == self.d_xi and torch.count_nonzero(xi).item() != 0:
+            return xi
+        mu_safe = mu.clamp_min(torch.finfo(mu.dtype).tiny)
+        qmd = quadratic_drift_index(Q, mu_safe)
+        sed = sed_index(Q, mu_safe)
+        total = Q.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+        queue_share = Q / total
+        qmd_rank = torch.argsort(torch.argsort(qmd, dim=-1), dim=-1).float()
+        sed_rank = torch.argsort(torch.argsort(sed, dim=-1), dim=-1).float()
+        denom = max(Q.shape[-1] - 1, 1)
+        qmd_rank = qmd_rank / denom
+        sed_rank = sed_rank / denom
+        qmd_gap = (qmd - qmd.min(dim=-1, keepdim=True).values) / (qmd.abs().mean(dim=-1, keepdim=True) + 1.0)
+        sed_gap = (sed - sed.min(dim=-1, keepdim=True).values) / (sed.abs().mean(dim=-1, keepdim=True) + 1.0)
+        disagreement = (qmd.argmin(dim=-1) != sed.argmin(dim=-1)).float().unsqueeze(-1).expand_as(Q)
+        features = [queue_share, qmd_rank, sed_rank, qmd_gap, sed_gap, disagreement]
+        xi_ctx = torch.stack([f for f in features], dim=-1)
+        if xi_ctx.shape[-1] > self.d_xi:
+            xi_ctx = xi_ctx[..., : self.d_xi]
+        elif xi_ctx.shape[-1] < self.d_xi:
+            pad = torch.zeros(*xi_ctx.shape[:-1], self.d_xi - xi_ctx.shape[-1], device=xi_ctx.device, dtype=xi_ctx.dtype)
+            xi_ctx = torch.cat([xi_ctx, pad], dim=-1)
+        return xi_ctx
+
+    @staticmethod
+    def _min_margin(cost: Tensor) -> Tensor:
+        top2 = torch.topk(cost, k=min(2, cost.shape[-1]), largest=False).values
+        if top2.shape[-1] == 1:
+            return torch.zeros_like(top2[:, 0])
+        return top2[:, 1] - top2[:, 0]
+
+    def _ambiguity_features(self, Q: Tensor, mu: Tensor, base_index: Tensor) -> Tensor:
+        qmd_index = quadratic_drift_index(Q, mu)
+        sed_index_v = sed_index(Q, mu)
+        qmd_margin = self._min_margin(qmd_index)
+        sed_margin = self._min_margin(sed_index_v)
+        base_margin = self._min_margin(base_index)
+        disagreement = (qmd_index.argmin(dim=-1) != sed_index_v.argmin(dim=-1)).float()
+        return torch.stack([qmd_margin, sed_margin, base_margin, disagreement], dim=-1)
+
     def forward_full(
         self,
         Q: Tensor,
@@ -172,12 +223,23 @@ class CertiQIndexModel(nn.Module):
     ) -> DispatcherForward:
         batch, _ = Q.shape
         mu_b = expand_mu(Q, mu)
+        xi_ctx = self._resolve_context(Q, mu_b, xi)
         base_index = self._base_geometry(Q, mu_b)
-        residual = self.scorer(Q, mu_b, xi)
-        learned_index = base_index + residual
+        _, global_features = _feature_stack(Q, mu_b, xi_ctx, self.d_xi)
+        residual = self.scorer(Q, mu_b, xi_ctx)
+        ambiguity = self._ambiguity_features(Q, mu_b, base_index)
+        gate_input = torch.cat([global_features, ambiguity], dim=-1)
+        gate = torch.sigmoid(self.gate_head(gate_input)).clamp(min=0.05, max=1.0)
+        learned_index = base_index + residual * gate
 
         effective_tau = self.tau * (self.exploration_temperature if training_mode else 1.0)
         proposal_logits = (-learned_index / effective_tau).clamp(min=-20.0, max=20.0)
+        if self.candidate_top_k is not None and 0 < self.candidate_top_k < self.N:
+            candidate_k = min(self.candidate_top_k, self.N)
+            candidate_idx = torch.topk(base_index, k=candidate_k, largest=False).indices
+            candidate_mask = torch.full_like(proposal_logits, float("-inf"))
+            candidate_mask.scatter_(1, candidate_idx, 0.0)
+            proposal_logits = proposal_logits + candidate_mask
         proposal = torch.softmax(proposal_logits, dim=-1)
 
         cost = base_index
