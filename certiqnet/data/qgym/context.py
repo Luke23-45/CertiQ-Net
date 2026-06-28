@@ -62,7 +62,7 @@ def _action_load(action_history: Sequence[Tensor] | None, *, ref: Tensor) -> Ten
     if action.dim() == 3:
         load = action.sum(dim=-2)
     elif action.dim() == 2:
-        load = action
+        load = action.sum(dim=0, keepdim=True)
     else:
         load = torch.zeros_like(ref)
     if load.shape != ref.shape:
