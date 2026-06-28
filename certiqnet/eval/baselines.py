@@ -11,6 +11,7 @@ from certiqnet.data.registry import DatasetRegistry
 from certiqnet.eval._base import discover_and_prepare
 from certiqnet.experiments.evaluators.baseline_runner import RolloutConfig, run_baseline_comparison
 from certiqnet.experiments.persistence.checkpoint import load_checkpoint_weights
+from certiqnet.experiments.persistence.checkpoint import infer_checkpoint_context_dim
 from certiqnet.experiments.evaluators.factory import build_model, build_mu
 from certiqnet.experiments.persistence.logging import BufferedExperimentLogger as ExperimentLogger
 from certiqnet.experiments.persistence.paths import RunPaths
@@ -58,6 +59,9 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
             N_bl = int(spec.env_N)
             mu = torch.tensor(spec.env_mu_fixed, dtype=torch.float32) if spec.env_mu_fixed is not None else build_mu(cfg)[0]
             lam = float(spec.env_lam) if spec.env_lam is not None else float(build_mu(cfg)[1])
+        checkpoint_d_xi = infer_checkpoint_context_dim(paths.root)
+        if checkpoint_d_xi > 0:
+            d_xi = checkpoint_d_xi
         model = build_model(cfg, N=N_bl, d_xi=d_xi)
         if str(cfg.get("certificate_status", "exact")) == "exact":
             validate_exact_certificate_constant(model, context="baseline comparisons")

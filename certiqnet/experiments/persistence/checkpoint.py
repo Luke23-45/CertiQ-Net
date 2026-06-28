@@ -174,6 +174,42 @@ def load_checkpoint_weights(model: torch.nn.Module, paths_root: Path) -> None:
         )
 
 
+def infer_checkpoint_context_dim(paths_root: Path, *, base_feature_dim: int = 7) -> int:
+    """Infer the encoder context width from a saved checkpoint.
+
+    The current CertiQ index model concatenates seven analytic token
+    features before appending optional context features.  Older runs
+    may have been saved with a different ``d_xi`` than the current
+    runtime adapter, so evaluation code can use this helper to build a
+    compatible model before loading weights.
+    """
+    ckpt_path = require_checkpoint_state(paths_root)
+    raw = torch.load(str(ckpt_path), map_location="cpu", weights_only=False)
+
+    if isinstance(raw, dict) and "state_dict" in raw:
+        sd = raw["state_dict"]
+        cleaned = {k.removeprefix("model."): v for k, v in sd.items() if k.startswith("model.")}
+    elif isinstance(raw, dict):
+        cleaned = raw
+    else:
+        return 0
+
+    candidate_keys = [
+        "encoder.token_encoder.0.weight",
+        "token_encoder.0.weight",
+    ]
+    for key in candidate_keys:
+        weight = cleaned.get(key)
+        if weight is None or not torch.is_tensor(weight) or weight.dim() != 2:
+            continue
+        in_features = int(weight.shape[1])
+        if in_features <= base_feature_dim:
+            return 0
+        return in_features - base_feature_dim
+
+    return 0
+
+
 # ── Experiment-level "last run" discovery ──────────────────────────────
 
 

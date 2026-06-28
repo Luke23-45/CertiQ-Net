@@ -11,6 +11,7 @@ from certiqnet.data.common.state_bank import generate_adversarial_states, genera
 from certiqnet.data.registry import DatasetRegistry
 from certiqnet.eval._base import discover_and_prepare
 from certiqnet.experiments.persistence.checkpoint import load_checkpoint_weights
+from certiqnet.experiments.persistence.checkpoint import infer_checkpoint_context_dim
 from certiqnet.experiments.evaluators.factory import build_model, build_mu
 from certiqnet.experiments.persistence.logging import BufferedExperimentLogger as ExperimentLogger
 from certiqnet.experiments.evaluators.metrics import aggregate_metrics, save_metrics
@@ -60,6 +61,9 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
             N_audit = int(spec.env_N)
             mu = torch.tensor(spec.env_mu_fixed, dtype=torch.float32) if spec.env_mu_fixed is not None else build_mu(cfg)[0]
             lam = float(spec.env_lam) if spec.env_lam is not None else float(build_mu(cfg)[1])
+        checkpoint_d_xi = infer_checkpoint_context_dim(paths.root)
+        if checkpoint_d_xi > 0:
+            d_xi = checkpoint_d_xi
         model = build_model(cfg, N=N_audit, d_xi=d_xi)
         if str(cfg.get("certificate_status", "exact")) == "exact":
             validate_exact_certificate_constant(model, context="audits")
@@ -94,6 +98,15 @@ def run_state_bank_audit(cfg: DictConfig, *, cwd: Path) -> None:
                 Q_obs, mu_obs, xi_obs = adapter.make_observation(Q_in, mu_bank)
             else:
                 Q_obs, mu_obs, xi_obs = Q_in, mu_bank, None
+            if int(getattr(model, "d_xi", 0)) <= 0:
+                xi_obs = None
+            elif xi_obs is not None and xi_obs.shape[-1] != int(getattr(model, "d_xi", 0)):
+                model_d_xi = int(getattr(model, "d_xi", 0))
+                if xi_obs.shape[-1] > model_d_xi:
+                    xi_obs = xi_obs[..., :model_d_xi]
+                else:
+                    pad = torch.zeros(*xi_obs.shape[:-1], model_d_xi - xi_obs.shape[-1], device=xi_obs.device, dtype=xi_obs.dtype)
+                    xi_obs = torch.cat([xi_obs, pad], dim=-1)
             with torch.no_grad():
                 if hasattr(model, "reset_dispatch_state"):
                     model.reset_dispatch_state()
