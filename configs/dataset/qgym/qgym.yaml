@@ -22,8 +22,8 @@ qgym:
     lr: 1.0e-4
     weight_decay: 1.0e-5
     rollout_horizon: 64
-    imitation_warmup_epochs: 20
-    expert_mode: sed
+    imitation_warmup_epochs: 0
+    expert_mode: null
     gamma: 0.99
     val_horizon_max: 128
   loss:
