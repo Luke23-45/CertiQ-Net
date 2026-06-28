@@ -142,8 +142,7 @@ def main() -> None:
         "trainer.precision=32-true",
         "trainer.accelerator=auto",
         "project.save_checkpoints=false",
-        "qgym.trainer.expert_mode=null",
-        "qgym.trainer.imitation_warmup_epochs=0",
+
     ]
 
     output_dir = ROOT / "outputs" / "cost_fn_compare"

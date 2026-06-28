@@ -14,7 +14,6 @@ qgym:
       max_queue: 15
       resample_every_epoch: true
       policy_buffer_max: 4096
-      teacher_mix_fraction: 0.25
       policy_mix_fraction: 0.25
       hard_state_fraction: 0.75
       adversarial_fraction: 0.25
@@ -22,13 +21,9 @@ qgym:
     lr: 1.0e-4
     weight_decay: 1.0e-5
     rollout_horizon: 64
-    imitation_warmup_epochs: 0
-    expert_mode: null
     gamma: 0.99
     val_horizon_max: 128
   loss:
-    omega_action: 1.5
-    omega_margin: 0.1
     omega_roll: 1.0
     omega_ent: 0.02
     omega_kl: 0.05

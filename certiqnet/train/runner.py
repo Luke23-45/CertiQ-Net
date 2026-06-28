@@ -218,8 +218,6 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
         if not isinstance(loss_cfg, dict):
             loss_cfg = {}
         loss_fn = CertiQNetLoss(
-            omega_action=float(loss_cfg.get("omega_action", 1.5)),
-            omega_margin=float(loss_cfg.get("omega_margin", 0.1)),
             omega_roll=float(loss_cfg.get("omega_roll", 1.0)),
             omega_ent=float(loss_cfg.get("omega_ent", 0.001)),
             omega_kl=float(loss_cfg.get("omega_kl", 0.05)),
@@ -241,8 +239,6 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             lr=float(trainer_container.get("lr", 3e-4)),
             weight_decay=float(trainer_container.get("weight_decay", 1e-5)),
             rollout_horizon=int(trainer_container.get("rollout_horizon", 64)),
-            imitation_warmup_epochs=int(trainer_container.get("imitation_warmup_epochs", 20)),
-            expert_mode=trainer_container.get("expert_mode", None),
             lam=float(lam),
             gamma=float(trainer_container.get("gamma", 0.99)),
             val_horizon_max=int(trainer_container.get("val_horizon_max", 64)),

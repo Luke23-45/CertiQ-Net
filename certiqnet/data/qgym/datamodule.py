@@ -20,8 +20,6 @@ Data Composition
 QGym-sampled states are the *primary* source.  On top of them the module
 layers:
 
-* **Teacher replay** — states visited by the SED/QMD expert during
-  previous rollouts.
 * **Policy replay** — states visited by the model's own policy.
 * **Hard / adversarial states** — high-backlog states from the
   state-bank generator, ensuring coverage of rarely-visited but
@@ -49,7 +47,6 @@ from certiqnet.data.collection_manager import DatasetCollectionManager
 from certiqnet.data.qgym.dataset import QGymDataset
 from certiqnet.data.registry import DatasetRegistry
 from certiqnet.data.common.state_bank import generate_state_bank
-from certiqnet.train.common.supervision import heuristic_actions
 from certiqnet.utils.platform import resolve_num_workers
 
 log = logging.getLogger(__name__)
@@ -81,8 +78,6 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         Rebuild the training dataset at the start of each epoch.
     policy_buffer_max : int
         Maximum number of policy-visited states in the replay buffer.
-    teacher_mix_fraction : float
-        Fraction of states drawn from the teacher replay buffer.
     policy_mix_fraction : float
         Fraction of states drawn from the policy replay buffer.
     hard_state_fraction : float
@@ -119,7 +114,6 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         datatype: str = "qgym",
         resample_every_epoch: bool = True,
         policy_buffer_max: int = 4096,
-        teacher_mix_fraction: float = 0.25,
         policy_mix_fraction: float = 0.25,
         hard_state_fraction: float = 0.5,
         adversarial_fraction: float = 0.25,
@@ -148,17 +142,13 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         self.qgym_adapter = qgym_adapter
 
         # ── Validate and store mix fractions ──────────────────────────
-        self.teacher_mix_fraction = float(teacher_mix_fraction)
         self.policy_mix_fraction = float(policy_mix_fraction)
         self.hard_state_fraction = float(hard_state_fraction)
         self.adversarial_fraction = float(adversarial_fraction)
 
-        frac_sum = self.teacher_mix_fraction + self.policy_mix_fraction
-        if frac_sum > _MAX_MIX_SUM:
+        if self.policy_mix_fraction > _MAX_MIX_SUM:
             raise ValueError(
-                f"Mix fractions (teacher={self.teacher_mix_fraction}, "
-                f"policy={self.policy_mix_fraction}) sum to {frac_sum:.3f}, "
-                "which exceeds 1.0.  Reduce one or more fractions."
+                f"policy_mix_fraction={self.policy_mix_fraction} exceeds 1.0."
             )
 
         # ── Mode detection ────────────────────────────────────────────
@@ -191,7 +181,6 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         self.val_ds: TensorDataset | None = None
         self.test_ds: TensorDataset | None = None
         self._policy_buffer: deque[Tensor] = deque(maxlen=self.policy_buffer_max)
-        self._teacher_buffer: deque[Tensor] = deque(maxlen=self.policy_buffer_max)
 
     # ── Compatibility properties ──────────────────────────────────────
 
@@ -301,14 +290,6 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         # ── Apply training defaults from spec (low-priority) ──────────
         defaults = spec.training_defaults
         if defaults:
-            # Only apply defaults if the user did not explicitly set these
-            # attributes.  Explicit __init__ args always win.  The magic
-            # numbers below match the constructor default values.
-            if (
-                self.teacher_mix_fraction == 0.25
-                and "teacher_mix_fraction" in defaults
-            ):
-                self.teacher_mix_fraction = float(defaults["teacher_mix_fraction"])
             if (
                 self.policy_mix_fraction == 0.25
                 and "policy_mix_fraction" in defaults
@@ -421,10 +402,6 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         """Append model-visited states to the policy replay buffer."""
         self._policy_buffer.append(Q.detach().cpu())
 
-    def record_teacher_states(self, Q: Tensor) -> None:
-        """Append teacher-visited states to the teacher replay buffer."""
-        self._teacher_buffer.append(Q.detach().cpu())
-
     # ── Internal helpers ──────────────────────────────────────────────
 
     @staticmethod
@@ -455,13 +432,12 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
 
         # ── Compute counts ────────────────────────────────────────────
         qgym_fraction = max(
-            0.0, 1.0 - self.teacher_mix_fraction - self.policy_mix_fraction,
+            0.0, 1.0 - self.policy_mix_fraction,
         )
         qgym_count = max(1, int(self.n_samples * qgym_fraction))
         hard_count = int(qgym_count * self.hard_state_fraction)
         easy_qgym_count = qgym_count - hard_count
 
-        teacher_count = max(0, int(self.n_samples * self.teacher_mix_fraction))
         policy_count = max(0, int(self.n_samples * self.policy_mix_fraction))
         adversarial_count = max(1, int(self.n_samples * self.adversarial_fraction))
 
@@ -495,16 +471,11 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             qgym_mu = torch.empty(0, self.N)
 
         # ── Replay buffers ───────────────────────────────────────────
-        teacher_states = self._sample_rows(
-            self._buffer_tensor(self._teacher_buffer), teacher_count, gen
-        )
         policy_states = self._sample_rows(
             self._buffer_tensor(self._policy_buffer), policy_count, gen
         )
 
-        # Bootstrap from QGym source if replay buffers are empty
-        if teacher_states.numel() == 0 and teacher_count > 0:
-            teacher_states = self._bootstrap_states(teacher_count, gen)
+        # Bootstrap from QGym source if policy buffer is empty
         if policy_states.numel() == 0 and policy_count > 0:
             policy_states = self._bootstrap_states(policy_count, gen)
 
@@ -531,7 +502,6 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             [
                 qgym_q,
                 hard_states.float(),
-                teacher_states.float(),
                 policy_states.float(),
                 adversarial_states.float(),
             ],
@@ -541,20 +511,18 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
             [
                 qgym_mu,
                 self.mu.unsqueeze(0).expand(hard_states.shape[0], -1),
-                self.mu.unsqueeze(0).expand(teacher_states.shape[0], -1),
                 self.mu.unsqueeze(0).expand(policy_states.shape[0], -1),
                 self.mu.unsqueeze(0).expand(adversarial_states.shape[0], -1),
             ],
             dim=0,
         )
-        sed_action, qmd_action = heuristic_actions(Q, mu)
         cost = self._compute_cost(Q)
 
         if self.context_dim > 0:
             xi = torch.zeros(Q.shape[0], self.N, self.context_dim)
-            tensors = (Q, mu, xi, cost, sed_action, qmd_action)
+            tensors = (Q, mu, xi, cost)
         else:
-            tensors = (Q, mu, cost, sed_action, qmd_action)
+            tensors = (Q, mu, cost)
 
         if self.train_ds is None:
             self.train_ds = TensorDataset(*tensors)
@@ -600,33 +568,12 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
 
         Handles the following tuple lengths:
 
-        * 6: ``(Q, mu, xi, cost, sed_action, qmd_action)``
-        * 5: ``(Q, mu, cost, sed_action, qmd_action)``
         * 4: ``(Q, mu, xi, cost)``
         * 3: ``(Q, mu, cost)``
         """
         first = batch[0]
         n = len(first)
 
-        if n == 6:
-            Q, mu, xi, cost, sed_action, qmd_action = zip(*batch, strict=True)
-            return {
-                "Q": torch.stack(list(Q)),
-                "mu": torch.stack(list(mu)),
-                "xi": torch.stack(list(xi)),
-                "cost": torch.stack(list(cost)),
-                "sed_action": torch.stack(list(sed_action)),
-                "qmd_action": torch.stack(list(qmd_action)),
-            }
-        if n == 5:
-            Q, mu, cost, sed_action, qmd_action = zip(*batch, strict=True)
-            return {
-                "Q": torch.stack(list(Q)),
-                "mu": torch.stack(list(mu)),
-                "cost": torch.stack(list(cost)),
-                "sed_action": torch.stack(list(sed_action)),
-                "qmd_action": torch.stack(list(qmd_action)),
-            }
         if n == 4:
             Q, mu, xi, cost = zip(*batch, strict=True)
             return {
@@ -696,8 +643,7 @@ class QGymDataModule(pl.LightningDataModule if pl is not None else object):
         return (
             f"QGymDataModule(N={self.N}, mode='{mode}', "
             f"n_samples={self.n_samples}, batch_size={self.batch_size}, "
-            f"mix=[qgym={1 - self.teacher_mix_fraction - self.policy_mix_fraction:.2f}, "
-            f"teacher={self.teacher_mix_fraction:.2f}, "
+            f"mix=[qgym={1 - self.policy_mix_fraction:.2f}, "
             f"policy={self.policy_mix_fraction:.2f}], "
             f"h={'yes' if self._h is not None else 'no'})"
         )

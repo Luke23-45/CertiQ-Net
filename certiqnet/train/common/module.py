@@ -12,7 +12,6 @@ try:
 except ModuleNotFoundError:
     pl = None
 
-from certiqnet.dispatcher.delay_geometry import quadratic_drift_index, sed_index
 from certiqnet.dispatcher.types import DispatcherDiagnostics
 from certiqnet.train.common.loss import CertiQNetLoss
 from certiqnet.utils.ctmc import CTMCEnvironment
@@ -37,17 +36,7 @@ def _stack_mean(diags: list[DispatcherDiagnostics]) -> DispatcherDiagnostics:
 
 
 class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Module):
-    """Base Lightning wrapper with the formal 5-term objective.
-
-    ``expert_mode`` controls imitation learning against an analytical
-    dispatcher:
-        * ``"qmd"`` — QMD targets (CE + margin + entropy + KL)
-        * ``"sed"`` — SED targets
-        * ``None`` — no imitation (only rollout + entropy + KL)
-
-    When imitation is enabled the curriculum is additive:
-        1. Train proposal against expert targets (CE + margin + entropy + KL)
-        2. Add rollout-cost optimization via simple REINFORCE
+    """Base Lightning wrapper with the formal 3-term objective.
 
     The certificate layer is part of every forward pass (it defines the
     policy).  No value critic, no PPO, no Lagrangian dual.
@@ -61,8 +50,6 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         lr: float = 3e-4,
         weight_decay: float = 1e-5,
         rollout_horizon: int = 16,
-        imitation_warmup_epochs: int = 20,
-        expert_mode: str | None = None,
         lam: float = 1.0,
         gamma: float = 0.99,
         val_horizon_max: int = 64,
@@ -74,8 +61,6 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self.lr = lr
         self.weight_decay = weight_decay
         self.rollout_horizon = int(rollout_horizon)
-        self.imitation_warmup_epochs = imitation_warmup_epochs
-        self.expert_mode = expert_mode
         self.lam = float(lam)
         self.gamma = float(gamma)
         self.val_horizon_max = int(val_horizon_max)
@@ -86,18 +71,6 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         dm = getattr(self.trainer, "datamodule", None)
         if dm is not None and hasattr(dm, "resample_train_data"):
             dm.resample_train_data()
-
-    def _collect_expert_actions(self, Q: Tensor, mu: Tensor) -> Tensor | None:
-        if self.expert_mode is None:
-            return None
-        if mu.dim() == 1:
-            mu = mu.unsqueeze(0).expand(Q.shape[0], -1)
-        mu_safe = mu.clamp_min(mu.new_tensor(1e-12))
-        if self.expert_mode == "sed":
-            return sed_index(Q, mu_safe).argmin(dim=-1)
-        if self.expert_mode == "qmd":
-            return quadratic_drift_index(Q, mu_safe).argmin(dim=-1)
-        raise ValueError(f"Unknown expert_mode: {self.expert_mode}")
 
     # ── Domain hook ─────────────────────────────────────────────────
 
@@ -122,67 +95,52 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         if hasattr(self.model, "reset_dispatch_state"):
             self.model.reset_dispatch_state()
 
-        # Always-active: forward pass with exact certificate
-        expert_action = self._collect_expert_actions(Q0, mu0)
         init_out = self.model.forward_full(Q0, mu0, xi0, training_mode=True)
         self._log_diagnostics(init_out.diagnostics, "train")
 
-        epoch = int(getattr(self.trainer, "current_epoch", 0))
-        has_imitation = expert_action is not None
-        in_imitation_phase = has_imitation and epoch < self.imitation_warmup_epochs
+        # Rollout-cost optimization via REINFORCE
+        N = int(Q0.shape[-1])
+        env = CTMCEnvironment(N=N, lam=self.lam, mu=mu0[0], B=Q0.shape[0])
+        env.reset(Q0.detach().clone())
 
-        if in_imitation_phase:
-            losses = self.loss_fn(
-                proposal_logits=init_out.proposal_logits,
-                action_target=expert_action,
-                p_cert=init_out.p_cert,
-            )
-        else:
-            # Rollout-cost optimization via REINFORCE
-            # (imitation losses still computed inside loss_fn when expert_action is not None)
-            N = int(Q0.shape[-1])
-            env = CTMCEnvironment(N=N, lam=self.lam, mu=mu0[0], B=Q0.shape[0])
-            env.reset(Q0.detach().clone())
+        policy_diagnostics: list[DispatcherDiagnostics] = []
+        log_probs: list[Tensor] = []
+        rewards: list[Tensor] = []
 
-            policy_diagnostics: list[DispatcherDiagnostics] = []
-            log_probs: list[Tensor] = []
-            rewards: list[Tensor] = []
+        for _ in range(self.rollout_horizon):
+            Q_obs = env.Q.clone()
+            mu_obs = mu0
+            xi_obs = xi0
+            Q_obs, mu_obs, xi_obs = self._make_observation(Q_obs, mu_obs, xi_obs)
+            out = self.model.forward_full(Q_obs, mu_obs, xi_obs, training_mode=True)
+            dist = Categorical(probs=out.pi)
+            action_idx = dist.sample()
+            action_pi = F.one_hot(action_idx, num_classes=N).float()
+            step = env.step(action_pi)
+            reward = -(step["cost"].float() * step["dt"].float())
+            policy_diagnostics.append(out.diagnostics)
+            log_probs.append(dist.log_prob(action_idx))
+            rewards.append(reward)
 
-            for _ in range(self.rollout_horizon):
-                Q_obs = env.Q.clone()
-                mu_obs = mu0
-                xi_obs = xi0
-                Q_obs, mu_obs, xi_obs = self._make_observation(Q_obs, mu_obs, xi_obs)
-                out = self.model.forward_full(Q_obs, mu_obs, xi_obs, training_mode=True)
-                dist = Categorical(probs=out.pi)
-                action_idx = dist.sample()
-                action_pi = F.one_hot(action_idx, num_classes=N).float()
-                step = env.step(action_pi)
-                reward = -(step["cost"].float() * step["dt"].float())
-                policy_diagnostics.append(out.diagnostics)
-                log_probs.append(dist.log_prob(action_idx))
-                rewards.append(reward)
+        rewards_t = torch.stack(rewards, dim=0)
+        log_probs_t = torch.stack(log_probs, dim=0)
 
-            rewards_t = torch.stack(rewards, dim=0)
-            log_probs_t = torch.stack(log_probs, dim=0)
+        # Simple discounted returns (no GAE, no value baseline)
+        returns = torch.zeros_like(rewards_t)
+        running = torch.zeros_like(rewards_t[0])
+        for t in reversed(range(self.rollout_horizon)):
+            running = rewards_t[t] + self.gamma * running
+            returns[t] = running
 
-            # Simple discounted returns (no GAE, no value baseline)
-            returns = torch.zeros_like(rewards_t)
-            running = torch.zeros_like(rewards_t[0])
-            for t in reversed(range(self.rollout_horizon)):
-                running = rewards_t[t] + self.gamma * running
-                returns[t] = running
+        rollout_diag = _stack_mean(policy_diagnostics)
+        self._log_diagnostics(rollout_diag, "train_rollout")
 
-            rollout_diag = _stack_mean(policy_diagnostics)
-            self._log_diagnostics(rollout_diag, "train_rollout")
-
-            losses = self.loss_fn(
-                proposal_logits=init_out.proposal_logits,
-                action_target=expert_action,
-                p_cert=init_out.p_cert,
-                rollout_log_probs=log_probs_t.reshape(-1),
-                rollout_returns=returns.reshape(-1),
-            )
+        losses = self.loss_fn(
+            proposal_logits=init_out.proposal_logits,
+            p_cert=init_out.p_cert,
+            rollout_log_probs=log_probs_t.reshape(-1),
+            rollout_returns=returns.reshape(-1),
+        )
 
         for key, value in losses.items():
             self.log(key, value, on_step=True, on_epoch=True, prog_bar=(key == "total"))
@@ -190,8 +148,6 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         if dm is not None:
             if hasattr(dm, "record_policy_states"):
                 dm.record_policy_states(Q0.detach().to("cpu", non_blocking=True))
-            if expert_action is not None and hasattr(dm, "record_teacher_states"):
-                dm.record_teacher_states(Q0.detach().to("cpu", non_blocking=True))
 
         return losses["total"]
 

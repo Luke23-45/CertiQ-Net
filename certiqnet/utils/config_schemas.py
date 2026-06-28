@@ -46,8 +46,6 @@ class DatatypeTrainerConfig:
     lr: float = MISSING
     weight_decay: float = MISSING
     rollout_horizon: int = MISSING
-    imitation_warmup_epochs: int = MISSING
-    expert_mode: str | None = None
     gamma: float = MISSING
     val_horizon_max: int = MISSING
 
@@ -63,8 +61,6 @@ class DatatypeProfileConfig:
 
 @dataclass
 class LossConfig:
-    omega_action: float = 1.5
-    omega_margin: float = 0.1
     omega_roll: float = 1.0
     omega_ent: float = 0.001
     omega_kl: float = 0.05
