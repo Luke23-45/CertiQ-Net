@@ -1,8 +1,7 @@
-diff --git a/main/env.py b/main/env.py
-index 5420437..b9f8d21 100644
 --- a/main/env.py
 +++ b/main/env.py
-@@ -92,7 +92,7 @@ class DiffDiscreteEventSystem(gym.Env):
+@@ -92,7 +92,7 @@
+         self.mu = mu.repeat(batch,1,1).to(self.device)
          self.q = self.network.size()[-1]
          self.s = self.network.size()[-2]
 -        self.h = torch.tensor(h).float().to(device)
@@ -10,7 +9,8 @@ index 5420437..b9f8d21 100644
          self.temp = temp
          self.st_argmin = STargmin(temp = self.temp)
          self.f_hook = f_hook
-@@ -172,7 +172,7 @@ class DiffDiscreteEventSystem(gym.Env):
+@@ -172,7 +172,7 @@
+         # print(queues)    
          ###TODO Changed
          if self.use_sb:
 -            action = torch.tensor(action).float().to(self.device)
@@ -18,7 +18,7 @@ index 5420437..b9f8d21 100644
              
          action = action * self.network
          
-@@ -203,7 +203,7 @@ class DiffDiscreteEventSystem(gym.Env):
+@@ -203,7 +203,7 @@
          #eff_service_times = torch.stack([torch.min(torch.stack(self.service_times[q]) / torch.stack(allocated_work[q])) for q in range(self.q)])
          
          
@@ -27,12 +27,12 @@ index 5420437..b9f8d21 100644
          for q in range(self.q):
              if num_allocated[q] > 0:
                  eff_service_times[q] = torch.stack(service_times[q][:num_allocated[q]])[:,0,q] / torch.clip(torch.stack(allocated_work[q]), min = self.eps)
-@@ -212,6 +212,8 @@ class DiffDiscreteEventSystem(gym.Env):
+@@ -211,6 +211,8 @@
+         
          min_eff_service_times = torch.stack([torch.min(eff_service_times[q]) for q in range(self.q)])
          min_eff_service_times = min_eff_service_times.unsqueeze(0)
-         
 +        if arrival_times.dim() == 2 and min_eff_service_times.shape[0] == 1 and arrival_times.shape[0] > 1:
 +            min_eff_service_times = min_eff_service_times.expand(arrival_times.shape[0], -1)
          
+         
          # arrival times and service times are both q vectors
-         event_times = torch.cat((arrival_times, min_eff_service_times), dim=1).float()
