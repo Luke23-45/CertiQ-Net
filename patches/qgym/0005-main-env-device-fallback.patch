@@ -1,7 +1,23 @@
 diff --git a/main/env.py b/main/env.py
-index 5420437..f368898 100644
+index 5420437..b9f8d21 100644
 --- a/main/env.py
 +++ b/main/env.py
+@@ -92,7 +92,7 @@ class DiffDiscreteEventSystem(gym.Env):
+         self.q = self.network.size()[-1]
+         self.s = self.network.size()[-2]
+-        self.h = torch.tensor(h).float().to(device)
++        self.h = torch.as_tensor(h, device=device).float()
+         self.temp = temp
+         self.st_argmin = STargmin(temp = self.temp)
+         self.f_hook = f_hook
+@@ -172,7 +172,7 @@ class DiffDiscreteEventSystem(gym.Env):
+         ###TODO Changed
+         if self.use_sb:
+-            action = torch.tensor(action).float().to(self.device)
++            action = torch.as_tensor(action, device=self.device).float()
+             
+         action = action * self.network
+         
 @@ -203,7 +203,7 @@ class DiffDiscreteEventSystem(gym.Env):
          #eff_service_times = torch.stack([torch.min(torch.stack(self.service_times[q]) / torch.stack(allocated_work[q])) for q in range(self.q)])
          
