@@ -1,8 +1,8 @@
 diff --git a/main/env.py b/main/env.py
-index 5420437..d128c38 100644
+index 5420437..f368898 100644
 --- a/main/env.py
 +++ b/main/env.py
-@@ -203,7 +203,9 @@ class DiffDiscreteEventSystem(gym.Env):
+@@ -203,7 +203,7 @@ class DiffDiscreteEventSystem(gym.Env):
          #eff_service_times = torch.stack([torch.min(torch.stack(self.service_times[q]) / torch.stack(allocated_work[q])) for q in range(self.q)])
          
          
@@ -11,15 +11,12 @@ index 5420437..d128c38 100644
          for q in range(self.q):
              if num_allocated[q] > 0:
                  eff_service_times[q] = torch.stack(service_times[q][:num_allocated[q]])[:,0,q] / torch.clip(torch.stack(allocated_work[q]), min = self.eps)
-                 #eff_service_times[q] = torch.stack(self.service_times[q])[:num_allocated[q]] / allocated_work[q]
-         
-         
+@@ -212,6 +212,8 @@ class DiffDiscreteEventSystem(gym.Env):
          min_eff_service_times = torch.stack([torch.min(eff_service_times[q]) for q in range(self.q)])
          min_eff_service_times = min_eff_service_times.unsqueeze(0)
+         
 +        if arrival_times.dim() == 2 and min_eff_service_times.shape[0] == 1 and arrival_times.shape[0] > 1:
 +            min_eff_service_times = min_eff_service_times.expand(arrival_times.shape[0], -1)
          
-         
          # arrival times and service times are both q vectors
          event_times = torch.cat((arrival_times, min_eff_service_times), dim=1).float()
-
