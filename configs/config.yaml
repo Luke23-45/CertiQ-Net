@@ -1,11 +1,6 @@
-# ──────────────────────────────────────────────────────────────────────────────
-# configs/config.yaml  — Hydra root config
-#
-# This is the fallback root config used by train.py in legacy mode.
-# Most real runs use an experiment config (e.g. main_queueing.yaml) which
-# explicitly defines datatype profiles.  This root config is minimal and
-# requires an override (--config) to pick a datatype.
-# ──────────────────────────────────────────────────────────────────────────────
+# @package _global_
+# Hydra root config fallback used by train.py in legacy mode.
+
 defaults:
   - model: certiq_index
   - adapter: queueing
@@ -24,3 +19,14 @@ project:
   resume_from_checkpoint: null
   log_dir: null
   save_checkpoints: true
+
+early_stopping:
+  enabled: true
+  monitor: val/selection_score
+  mode: min
+  patience: 12
+  min_delta: 1.0e-3
+  strict: true
+  check_finite: true
+  check_on_train_epoch_end: false
+  verbose: true

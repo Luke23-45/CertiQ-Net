@@ -179,6 +179,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         for t in reversed(range(self.rollout_horizon)):
             running = rewards_t[t] + self.gamma * running
             returns[t] = running
+        returns = (returns - returns.mean()) / returns.std(unbiased=False).clamp_min(1e-6)
 
         rollout_diag = _stack_mean(policy_diagnostics)
         self._log_diagnostics(rollout_diag, "train_rollout")
@@ -310,7 +311,8 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             weight_decay=self.weight_decay,
         )
         max_epochs = getattr(self.trainer, "max_epochs", 200) if getattr(self, "trainer", None) else 200
+        eta_min = max(self.lr * 0.1, 1e-5)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=max_epochs
+            optimizer, T_max=max_epochs, eta_min=eta_min
         )
         return {"optimizer": optimizer, "lr_scheduler": scheduler}

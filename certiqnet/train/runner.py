@@ -277,6 +277,22 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
                     every_n_epochs=1,
                 )
             )
+        early_stop_cfg = cfg.get("early_stopping", {})
+        if bool(early_stop_cfg.get("enabled", True)):
+            callbacks.append(
+                pl.callbacks.EarlyStopping(
+                    monitor=str(early_stop_cfg.get("monitor", "val/selection_score")),
+                    mode=str(early_stop_cfg.get("mode", "min")),
+                    patience=int(early_stop_cfg.get("patience", 12)),
+                    min_delta=float(early_stop_cfg.get("min_delta", 1e-3)),
+                    strict=bool(early_stop_cfg.get("strict", True)),
+                    check_finite=bool(early_stop_cfg.get("check_finite", True)),
+                    check_on_train_epoch_end=bool(early_stop_cfg.get("check_on_train_epoch_end", False)),
+                    stopping_threshold=early_stop_cfg.get("stopping_threshold", None),
+                    divergence_threshold=early_stop_cfg.get("divergence_threshold", None),
+                    verbose=bool(early_stop_cfg.get("verbose", True)),
+                )
+            )
         callbacks.append(pl.callbacks.LearningRateMonitor(logging_interval="step"))
 
         if bool(cfg.runner.get("show_progress", True)):

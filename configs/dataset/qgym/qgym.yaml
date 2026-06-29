@@ -30,3 +30,14 @@ qgym:
     omega_roll: 1.0
     omega_ent: 0.02
     omega_kl: 0.05
+
+early_stopping:
+  enabled: true
+  monitor: val/selection_score
+  mode: min
+  patience: 12
+  min_delta: 1.0e-3
+  strict: true
+  check_finite: true
+  check_on_train_epoch_end: false
+  verbose: true

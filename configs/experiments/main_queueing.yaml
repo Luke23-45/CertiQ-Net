@@ -29,6 +29,17 @@ experiment_family: main_queueing
 certificate_status: exact
 datatype: qgym
 
+early_stopping:
+  enabled: true
+  monitor: val/selection_score
+  mode: min
+  patience: 12
+  min_delta: 1.0e-3
+  strict: true
+  check_finite: true
+  check_on_train_epoch_end: false
+  verbose: true
+
 # Backwards compatibility block for external scripts (e.g. Colab) 
 # that pass --set "studies.runner.baselines.include=[...]"
 studies:
