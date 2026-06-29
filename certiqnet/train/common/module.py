@@ -310,7 +310,8 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             weight_decay=self.weight_decay,
         )
         max_epochs = getattr(self.trainer, "max_epochs", 200) if getattr(self, "trainer", None) else 200
+        eta_min = max(self.lr * 0.1, 1e-5)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=max_epochs
+            optimizer, T_max=max_epochs, eta_min=eta_min
         )
         return {"optimizer": optimizer, "lr_scheduler": scheduler}

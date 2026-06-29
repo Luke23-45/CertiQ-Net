@@ -1,15 +1,18 @@
 # @package _global_
-# Cloud/Colab-optimised progress bar.
+# Quiet cloud/Colab profile.
 #
-# Overrides the TTY-detection so progress bars render even when stdout
-# is piped (e.g. Colab ``!`` shell, CI logs, SLURM output).
+# Suppresses tqdm-style progress bars and Lightning progress bars so
+# only structured logs remain in notebook / piped environments.
 #
 # Use:
-#   python -m studies.runner.families.main_queueing progress=cloud
+#   python -m certiqnet.scripts.train --config-name experiments/main_queueing progress=cloud
 progress:
-  force_show: true
-  leave: true
+  force_show: false
+  leave: false
   dynamic_ncols: false
   ncols: 80
-  ascii: false
+  ascii: true
   mininterval: 0.5
+
+runner:
+  show_progress: false
