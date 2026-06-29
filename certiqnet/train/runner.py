@@ -31,6 +31,7 @@ from certiqnet.train.common.loss import CertiQNetLoss
 from certiqnet.train.queueing.module import QueueingLightningModule
 from certiqnet.utils.platform import detect_platform, resolve_trainer_config
 from certiqnet.utils.qgym_rollout import resolve_qgym_effective_mu
+from certiqnet.utils.submodule_patches import apply_qgym_patches
 from certiqnet.utils.progress import configure_progress
 
 try:
@@ -72,6 +73,7 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
     seed = int(cfg.project.seed)
     random.seed(seed)
     torch.manual_seed(seed)
+    apply_qgym_patches(reset=True)
 
     try:
         platform_info = detect_platform()

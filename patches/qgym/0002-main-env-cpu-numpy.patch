@@ -1,0 +1,14 @@
+diff --git a/main/env.py b/main/env.py
+index 5420437..36163bb 100644
+--- a/main/env.py
++++ b/main/env.py
+@@ -42,7 +42,7 @@ def allocator(action, mu, queue_service_times):
+     num_q = a.size()[-1]
+     
+     # identify non-zero actions
+-    nonzero_inds = a[0].detach().numpy().nonzero()
++    nonzero_inds = a[0].detach().cpu().numpy().nonzero()
+     nonzero_inds = np.transpose(nonzero_inds).tolist()
+     
+     # for each queue, identify servers with positive action
+

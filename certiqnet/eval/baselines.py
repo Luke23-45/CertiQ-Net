@@ -21,6 +21,7 @@ from certiqnet.train._shared import (
 )
 from certiqnet.utils.platform import detect_platform
 from certiqnet.utils.qgym_rollout import resolve_qgym_effective_mu
+from certiqnet.utils.submodule_patches import apply_qgym_patches
 from certiqnet.utils.progress import configure_progress
 
 
@@ -30,6 +31,7 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
     baseline_error: BaseException | None = None
     baseline_traceback: str | None = None
     platform_info = detect_platform()
+    apply_qgym_patches(reset=True)
 
     if "progress" in cfg:
         configure_progress(OmegaConf.to_container(cfg.progress, resolve=True))

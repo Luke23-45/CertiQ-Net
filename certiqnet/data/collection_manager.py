@@ -25,6 +25,7 @@ from certiqnet.data.registry import (
     _metadata_matches_spec,
     dataset_spec_hash,
 )
+from certiqnet.utils.submodule_patches import apply_qgym_patches
 
 log = logging.getLogger(__name__)
 
@@ -110,6 +111,7 @@ class DatasetCollectionManager:
         Path
             The output directory where the collected data was written.
         """
+        apply_qgym_patches(reset=True)
         output_dir = self._resolve_output(spec)
 
         # ── Check for existing data ───────────────────────────────────
@@ -474,6 +476,7 @@ class DatasetCollectionManager:
         FileNotFoundError
             If dataset is missing and *auto_collect* is ``False``.
         """
+        apply_qgym_patches(reset=True)
         spec = self._registry.get(name)
         output_dir = self._registry.resolve_path(name)
 

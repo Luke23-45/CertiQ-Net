@@ -1,0 +1,50 @@
+diff --git a/RL/utils/rl_env.py b/RL/utils/rl_env.py
+index ce83bbc..46e2777 100644
+--- a/RL/utils/rl_env.py
++++ b/RL/utils/rl_env.py
+@@ -163,12 +163,21 @@ def load_rl_p_env(env_config, temp, batch, seed, policy_name, device):
+         lam_r = np.load(lam_r_path)
+     else:
+         lam_r = lam_params['val']
+-    def lam(t):
++    def lam(t, rng=None, batch=None):
+             if lam_type == 'constant':
+                 lam = lam_r
+             elif lam_type == 'step':
+                 is_surge = 1*(t.data.cpu().numpy() <= lam_params['t_step'])
+                 lam = is_surge * np.array(lam_params['val1']) + (1 - is_surge) * np.array(lam_params['val2'])
++            elif lam_type == 'hyper':
++                scale = lam_params.get('scale', 0.8)
++                lam_r_arr = np.asarray(lam_r, dtype=float)
++                if rng is None or batch is None:
++                    lam = lam_r_arr
++                else:
++                    lam_r_2d = lam_r_arr.reshape((1, len(lam_r_arr))).repeat(batch, axis=0)
++                    switch = rng.binomial(1, 0.5, (batch, 1))
++                    lam = switch * (lam_r_2d / (1 + scale)) + (1 - switch) * (lam_r_2d / (1 - scale))
+             else:
+                 return 'Nonvalid arrival rate'
+             
+@@ -184,7 +193,7 @@ def load_rl_p_env(env_config, temp, batch, seed, policy_name, device):
+ 
+         def inter_arrival_dists(state, batch, t):
+             exps = state.exponential(1, (batch, orig_q))
+-            lam_rate = lam(t)
++            lam_rate = lam(t, rng=state, batch=batch)
+             return exps / lam_rate
+ 
+         interarrivals = torch.tensor(inter_arrival_dists(self.state, self.batch, time)).to(self.device)
+@@ -192,6 +201,12 @@ def load_rl_p_env(env_config, temp, batch, seed, policy_name, device):
+     
+     def draw_service(self, time):
+         def service_dists(state, batch, t):
++            if "service_type" in env_config.keys() and env_config["service_type"] == "hyper":
++                scale = lam_params.get('scale', 0.8)
++                coins = state.binomial(1, 0.5, size=(batch, orig_q))
++                a = state.exponential((1 + scale), (batch, orig_q))
++                b = state.exponential((1 - scale), (batch, orig_q))
++                return coins * a + (1 - coins) * b
+             return state.exponential(1, (batch, orig_q))
+         service = torch.tensor(service_dists(self.state, self.batch, time)).to(self.device)
+         return service
+

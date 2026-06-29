@@ -1,0 +1,36 @@
+diff --git a/utils/routing.py b/utils/routing.py
+index 1c8d05b..fbf2194 100644
+--- a/utils/routing.py
++++ b/utils/routing.py
+@@ -42,8 +42,8 @@ def linear_assignment(values, servers, jobs):
+ 
+     s,q = values.shape
+     A = match_constraint_mat(s, q).toarray()
+-    c = np.reshape(-values, s * q)
+-    b = np.append(servers, jobs)
++    c = np.reshape(-values.detach().cpu().numpy(), s * q)
++    b = np.append(servers.detach().cpu().numpy(), jobs.detach().cpu().numpy())
+ 
+     res = opt.linprog(c=c,A_ub=A,b_ub=b, method = 'highs-ds')
+     X = np.reshape(res.x, (s,q))
+@@ -59,9 +59,9 @@ def linear_assignment_batch(values, s_bar, q_bar):
+     action = []
+ 
+     for b in range(batch):
+-        v = values[b].numpy()
+-        servers = s_bar[b].numpy()
+-        jobs = q_bar[b].numpy()
++        v = values[b].detach().cpu().numpy()
++        servers = s_bar[b].detach().cpu().numpy()
++        jobs = q_bar[b].detach().cpu().numpy()
+ 
+         A = match_constraint_mat(s, q).toarray()
+         c = np.reshape(-v, s * q)
+@@ -388,4 +388,4 @@ class Sinkhorn(torch.autograd.Function):
+ #             p_hot = torch.exp(log_p_hot)[:,:self.s,:self.q]
+             
+ #             return p.detach() + p_hot - p_hot.detach()
+-            
+\ No newline at end of file
++            
+
