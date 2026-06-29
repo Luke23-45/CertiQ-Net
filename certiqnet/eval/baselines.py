@@ -10,9 +10,9 @@ from omegaconf import DictConfig, OmegaConf
 from certiqnet.data.registry import DatasetRegistry
 from certiqnet.eval._base import discover_and_prepare
 from certiqnet.experiments.evaluators.baseline_runner import RolloutConfig, run_baseline_comparison
-from certiqnet.experiments.persistence.checkpoint import load_checkpoint_weights
 from certiqnet.experiments.persistence.checkpoint import infer_checkpoint_context_dim
-from certiqnet.experiments.evaluators.factory import build_model, build_mu
+from certiqnet.experiments.persistence.checkpoint import load_checkpoint_weights
+from certiqnet.experiments.evaluators.factory import build_model
 from certiqnet.experiments.persistence.logging import BufferedExperimentLogger as ExperimentLogger
 from certiqnet.experiments.persistence.paths import RunPaths
 from certiqnet.train._shared import (
@@ -20,6 +20,7 @@ from certiqnet.train._shared import (
     write_failure_artifacts,
 )
 from certiqnet.utils.platform import detect_platform
+from certiqnet.utils.qgym_rollout import resolve_qgym_effective_mu
 from certiqnet.utils.progress import configure_progress
 
 
@@ -57,8 +58,12 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
                 raise ValueError("QGym profile must include data.init_args.dataset_name")
             spec = DatasetRegistry().get(dataset_name)
             N_bl = int(spec.env_N)
-            mu = torch.tensor(spec.env_mu_fixed, dtype=torch.float32) if spec.env_mu_fixed is not None else build_mu(cfg)[0]
-            lam = float(spec.env_lam) if spec.env_lam is not None else float(build_mu(cfg)[1])
+            qgym_env_config = spec.env
+            mu = (
+                torch.tensor(spec.env_mu_fixed, dtype=torch.float32)
+                if spec.env_mu_fixed is not None
+                else resolve_qgym_effective_mu(spec.env, device="cpu").detach().cpu().float()
+            )
         checkpoint_d_xi = infer_checkpoint_context_dim(paths.root)
         if checkpoint_d_xi > 0:
             d_xi = checkpoint_d_xi
@@ -68,7 +73,7 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
         load_checkpoint_weights(model, paths.root)
         rollout = RolloutConfig(
             steps=int(cfg.runner.rollout_steps),
-            batch_size=int(cfg.runner.rollout_batch_size),
+            trajectories=int(cfg.runner.rollout_batch_size),
             max_backlog=float(cfg.runner.max_backlog),
             show_progress=bool(cfg.runner.show_progress),
         )
@@ -97,8 +102,8 @@ def run_baseline_paper_comparison(cfg: DictConfig, *, cwd: Path) -> None:
         bl_env_name = str(data_init_args.get("dataset_name", "")) if datatype == "qgym" else str(cfg.env.mu_mode)
         metrics = run_baseline_comparison(
             env_name=bl_env_name,
+            qgym_env_config=qgym_env_config,
             N=N_bl,
-            lam=lam,
             mu=mu,
             seed=int(cfg.project.seed),
             output_dir=paths.metrics,

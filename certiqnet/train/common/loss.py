@@ -27,10 +27,14 @@ class CertiQNetLoss(nn.Module):
         self.omega_kl = omega_kl
 
     def rollout_cost(self, cost_trace: Tensor, dt_trace: Tensor) -> Tensor:
-        """Time-weighted average backlog (evaluation metric)."""
-        weights = dt_trace.clamp_min(1e-9)
-        total_time = weights.sum().clamp_min(1e-9)
-        return (cost_trace * weights).sum() / total_time
+        """Average cost rate for QGym event traces.
+
+        QGym already returns per-event integrated cost, so the correct
+        time-average is the accumulated cost divided by the accumulated
+        event time.
+        """
+        total_time = dt_trace.clamp_min(1e-9).sum().clamp_min(1e-9)
+        return cost_trace.sum() / total_time
 
     def entropy_term(self, pi: Tensor) -> Tensor:
         """Policy entropy :math:`\\mathcal L_{\\mathrm{ent}} = H(\\pi)`."""

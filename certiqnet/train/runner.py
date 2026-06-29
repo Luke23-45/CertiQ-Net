@@ -13,7 +13,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from certiqnet.data.qgym.datamodule import QGymDataModule
 from certiqnet.data.registry import DatasetRegistry
-from certiqnet.experiments.evaluators.factory import build_model, build_mu
+from certiqnet.experiments.evaluators.factory import build_model
 from certiqnet.experiments.persistence.checkpoint import (
     save_checkpoint_state,
     save_last_run,
@@ -30,6 +30,7 @@ from certiqnet.train.channel.module import ChannelLightningModule
 from certiqnet.train.common.loss import CertiQNetLoss
 from certiqnet.train.queueing.module import QueueingLightningModule
 from certiqnet.utils.platform import detect_platform, resolve_trainer_config
+from certiqnet.utils.qgym_rollout import resolve_qgym_effective_mu
 from certiqnet.utils.progress import configure_progress
 
 try:
@@ -126,14 +127,6 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
                 f"'certificate_status=approximate'."
             )
 
-        env_node = cfg.get("env")
-        env_target = str(env_node.get("_target_", "QueueingCTMC") if env_node is not None else "QueueingCTMC")
-        if cfg_cert_status == "exact" and "QueueingCTMC" not in env_target:
-            raise ValueError(
-                "Constraint Violation: Exact certification requires the QueueingCTMC backend. "
-                f"Found backend target: {env_target}."
-            )
-
         run_logger.info(
             "adapter_info",
             adapter=adapter_name,
@@ -169,15 +162,11 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             raise ValueError("QGym profile must include data.init_args.dataset_name")
         spec = DatasetRegistry().get(dataset_name)
         N = int(spec.env_N)
+        qgym_env_config = spec.env
         mu = (
             torch.tensor(spec.env_mu_fixed, dtype=torch.float32)
             if spec.env_mu_fixed is not None
-            else build_mu(cfg)[0]
-        )
-        lam = (
-            float(spec.env_lam)
-            if spec.env_lam is not None
-            else float(build_mu(cfg)[1])
+            else resolve_qgym_effective_mu(spec.env, device="cpu").detach().cpu().float()
         )
         context_dim = int(model_profile_container.get("context_dim", 0))
         d_xi = max(d_xi, context_dim)
@@ -251,7 +240,8 @@ def run_training(cfg: DictConfig, *, cwd: Path) -> None:
             weight_decay=float(trainer_container.get("weight_decay", 1e-5)),
             rollout_horizon=int(trainer_container.get("rollout_horizon", 64)),
             context_dim=d_xi,
-            lam=float(lam),
+            qgym_env_config=qgym_env_config,
+            qgym_seed=seed,
             gamma=float(trainer_container.get("gamma", 0.99)),
             val_horizon_max=int(trainer_container.get("val_horizon_max", 64)),
         )

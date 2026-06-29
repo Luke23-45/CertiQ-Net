@@ -141,9 +141,9 @@ def save_manifest(
         else "QueueingAdapter"
     )
     backend = (
-        str(cfg.get("env", {}).get("_target_", "QueueingCTMC")).split(".")[-1]
+        str(cfg.get("env", {}).get("_target_", "QGym")).split(".")[-1]
         if cfg.get("env")
-        else "QueueingCTMC"
+        else "QGym"
     )
     model_category = (
         str(cfg.get("model", {}).get("_target_", "Unknown")).split(".")[-1]

@@ -1,4 +1,4 @@
-"""Queueing adapter for the exact CTMC model."""
+"""Queueing adapter for the exact queue-vector model."""
 
 import torch
 
@@ -6,7 +6,7 @@ from certiqnet.adapters.common.base import AdapterBatch, DispatchAdapter, Dispat
 
 
 class QueueingAdapter(DispatchAdapter):
-    """Exact adapter for states already represented as CTMC queues."""
+    """Exact adapter for states already represented as queue vectors."""
 
     CERTIFICATE_STATUS = "exact"
     context_dim = 0

@@ -5,6 +5,7 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 from collections import deque
+from pathlib import Path
 from torch import Tensor, nn
 from torch.distributions import Categorical
 
@@ -16,7 +17,12 @@ except ModuleNotFoundError:
 from certiqnet.dispatcher.types import DispatcherDiagnostics
 from certiqnet.train.common.loss import CertiQNetLoss
 from certiqnet.data.qgym.context import build_qgym_context
-from certiqnet.utils.ctmc import CTMCEnvironment
+from certiqnet.utils.qgym_rollout import (
+    as_batch_tensor,
+    build_qgym_rollout_env,
+    extract_qgym_queues,
+    qgym_action_from_pi,
+)
 
 
 def validation_selection_score(violation: Tensor, avg_cost: Tensor, p95_backlog: Tensor) -> Tensor:
@@ -53,7 +59,8 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         weight_decay: float = 1e-5,
         rollout_horizon: int = 16,
         context_dim: int = 0,
-        lam: float = 1.0,
+        qgym_env_config: str | Path | dict | None = None,
+        qgym_seed: int = 0,
         gamma: float = 0.99,
         val_horizon_max: int = 64,
     ) -> None:
@@ -65,7 +72,8 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self.weight_decay = weight_decay
         self.rollout_horizon = int(rollout_horizon)
         self.context_dim = int(context_dim)
-        self.lam = float(lam)
+        self.qgym_env_config = qgym_env_config
+        self.qgym_seed = int(qgym_seed)
         self.gamma = float(gamma)
         self.val_horizon_max = int(val_horizon_max)
         if hasattr(self, "save_hyperparameters"):
@@ -106,6 +114,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         Q: Tensor,
         mu: Tensor,
         *,
+        network: Tensor | None = None,
         history_Q: deque[Tensor],
         history_action: deque[Tensor],
         history_dt: deque[Tensor],
@@ -119,7 +128,18 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             history_Q=list(history_Q),
             history_action=list(history_action),
             history_dt=list(history_dt),
+            network=network,
             context_dim=ctx_dim,
+        )
+
+    def _build_qgym_env(self, batch_size: int, device: torch.device) -> object:
+        if self.qgym_env_config is None:
+            raise ValueError("qgym_env_config is required for QGym rollouts.")
+        return build_qgym_rollout_env(
+            self.qgym_env_config,
+            batch=batch_size,
+            seed=self.qgym_seed,
+            device=device,
         )
 
     # ── Training step ───────────────────────────────────────────────
@@ -134,10 +154,10 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         init_out = self.model.forward_full(Q0, mu0, xi0, training_mode=True)
         self._log_diagnostics(init_out.diagnostics, "train")
 
-        # Rollout-cost optimization via REINFORCE
+        # Rollout-cost optimization via QGym REINFORCE
         N = int(Q0.shape[-1])
-        env = CTMCEnvironment(N=N, lam=self.lam, mu=mu0[0], B=Q0.shape[0])
-        env.reset(Q0.detach().clone())
+        env = self._build_qgym_env(batch_size=Q0.shape[0], device=Q0.device)
+        env.reset(init_queues=Q0.detach().clone())
         history_Q: deque[Tensor] = deque([Q0.detach().clone()], maxlen=max(2, min(4, self.rollout_horizon)))
         history_action: deque[Tensor] = deque(maxlen=max(2, min(4, self.rollout_horizon)))
         history_dt: deque[Tensor] = deque(maxlen=max(2, min(4, self.rollout_horizon)))
@@ -147,11 +167,14 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         rewards: list[Tensor] = []
 
         for _ in range(self.rollout_horizon):
-            Q_obs = env.Q.clone()
-            mu_obs = mu0
+            current_q = env.obs.queues if hasattr(env, "obs") else env.env_state.queues
+            Q_raw = as_batch_tensor(current_q, device=Q0.device)
+            Q_obs = Q_raw
+            mu_obs = as_batch_tensor(mu0, device=Q0.device)
             xi_obs = self._rollout_context(
                 Q_obs,
                 mu_obs,
+                network=getattr(env, "network", None),
                 history_Q=history_Q,
                 history_action=history_action,
                 history_dt=history_dt,
@@ -161,14 +184,18 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             dist = Categorical(probs=out.pi)
             action_idx = dist.sample()
             action_pi = F.one_hot(action_idx, num_classes=N).float()
-            step = env.step(action_pi)
-            reward = -(step["cost"].float() * step["dt"].float())
+            action = qgym_action_from_pi(action_pi, env.network, Q_raw, sample=False)
+            step_obs, reward, _done, _truncated, info = env.step(action)
+            step_Q = extract_qgym_queues(step_obs, info, device=Q0.device)
+            step_cost = as_batch_tensor(info.get("cost", -reward), device=Q0.device).reshape(-1)
+            step_dt = as_batch_tensor(info.get("event_time", 1.0), device=Q0.device).reshape(-1)
+            reward = -step_cost
             policy_diagnostics.append(out.diagnostics)
             log_probs.append(dist.log_prob(action_idx))
             rewards.append(reward)
-            history_action.append(action_pi.detach())
-            history_dt.append(step["dt"].detach())
-            history_Q.append(step["Q"].detach())
+            history_action.append(action.detach())
+            history_dt.append(step_dt.detach())
+            history_Q.append(step_Q.detach())
 
         rewards_t = torch.stack(rewards, dim=0)
         log_probs_t = torch.stack(log_probs, dim=0)
@@ -214,13 +241,8 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         ) -> tuple[DispatcherDiagnostics, Tensor, Tensor, Tensor, Tensor]:
             if hasattr(self.model, "reset_dispatch_state"):
                 self.model.reset_dispatch_state()
-            env = CTMCEnvironment(
-                N=int(init_Q.shape[-1]),
-                lam=self.lam,
-                mu=init_mu[0],
-                B=init_Q.shape[0],
-            )
-            env.reset(init_Q.detach().clone())
+            env = self._build_qgym_env(batch_size=init_Q.shape[0], device=init_Q.device)
+            env.reset(init_queues=init_Q.detach().clone())
             history_Q: deque[Tensor] = deque([init_Q.detach().clone()], maxlen=max(2, min(4, horizon)))
             history_action: deque[Tensor] = deque(maxlen=max(2, min(4, horizon)))
             history_dt: deque[Tensor] = deque(maxlen=max(2, min(4, horizon)))
@@ -230,11 +252,14 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             dt_trace: list[Tensor] = []
             with torch.no_grad():
                 for _ in range(horizon):
-                    Q_obs = env.Q.clone()
-                    mu_obs = init_mu
+                    current_q = env.obs.queues if hasattr(env, "obs") else env.env_state.queues
+                    Q_raw = as_batch_tensor(current_q, device=init_Q.device)
+                    Q_obs = Q_raw
+                    mu_obs = as_batch_tensor(init_mu, device=init_Q.device)
                     xi_obs = self._rollout_context(
                         Q_obs,
                         mu_obs,
+                        network=getattr(env, "network", None),
                         history_Q=history_Q,
                         history_action=history_action,
                         history_dt=history_dt,
@@ -243,14 +268,18 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                     out = self.model.forward_full(Q_obs, mu_obs, xi_obs, training_mode=False)
                     action_idx = out.pi.argmax(dim=-1)
                     action_pi = F.one_hot(action_idx, num_classes=int(init_Q.shape[-1])).float()
-                    step = env.step(action_pi)
+                    action = qgym_action_from_pi(action_pi, env.network, Q_raw, sample=False)
+                    step_obs, _reward, _done, _truncated, info = env.step(action)
+                    step_Q = extract_qgym_queues(step_obs, info, device=init_Q.device)
+                    step_cost = as_batch_tensor(info.get("cost", 0.0), device=init_Q.device).reshape(-1)
+                    step_dt = as_batch_tensor(info.get("event_time", 1.0), device=init_Q.device).reshape(-1)
                     policy_diagnostics.append(out.diagnostics)
-                    queue_trace.append(step["Q"].detach())
-                    cost_trace.append(step["cost"].detach())
-                    dt_trace.append(step["dt"].detach())
-                    history_action.append(action_pi.detach())
-                    history_dt.append(step["dt"].detach())
-                    history_Q.append(step["Q"].detach())
+                    queue_trace.append(Q_raw.detach())
+                    cost_trace.append(step_cost.detach())
+                    dt_trace.append(step_dt.detach())
+                    history_action.append(action.detach())
+                    history_dt.append(step_dt.detach())
+                    history_Q.append(step_Q.detach())
             diag = _stack_mean(policy_diagnostics)
             backlog = torch.cat(queue_trace, dim=0).sum(dim=-1).float()
             cost_t = torch.cat(cost_trace, dim=0).float()

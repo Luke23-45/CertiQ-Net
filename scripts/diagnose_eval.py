@@ -26,8 +26,7 @@ import numpy as np
 # ---------------------------------------------------------------------------
 
 def _import_ctmc():
-    from certiqnet.utils.ctmc import CTMCEnvironment as _CTMCEnv
-    return _CTMCEnv
+    raise ImportError("CTMC has been removed; use the QGym rollout path instead.")
 
 def _import_models():
     from certiqnet.models.baselines import (
@@ -494,7 +493,7 @@ def test_ctmc_determinism(t: TestResult) -> None:
         return
 
     mu = HOSPITAL_MU
-    rollout = RolloutConfig(steps=50, batch_size=4, show_progress=False)
+    rollout = RolloutConfig(steps=50, trajectories=4, show_progress=False)
 
     from certiqnet.adapters.queueing.adapter import QueueingAdapter
     adapter = QueueingAdapter(assumptions_satisfied=True)
@@ -503,11 +502,11 @@ def test_ctmc_determinism(t: TestResult) -> None:
     mw = MaxWeight(N=HOSPITAL_N)
     r1 = evaluate_policy(
         name="mw_a", model=mw, env_name="hospital", seed=42,
-        N=HOSPITAL_N, lam=HOSPITAL_LAM, mu=mu, rollout=rollout, adapter=adapter,
+        N=HOSPITAL_N, mu=mu, rollout=rollout, adapter=adapter,
     )
     r2 = evaluate_policy(
         name="mw_b", model=mw, env_name="hospital", seed=42,
-        N=HOSPITAL_N, lam=HOSPITAL_LAM, mu=mu, rollout=rollout, adapter=adapter,
+        N=HOSPITAL_N, mu=mu, rollout=rollout, adapter=adapter,
     )
     f1 = r1.flat()
     f2 = r2.flat()
@@ -539,7 +538,7 @@ def test_collapse_scenario(t: TestResult) -> None:
         return
 
     mu = HOSPITAL_MU
-    rollout = RolloutConfig(steps=50, batch_size=4, show_progress=False)
+    rollout = RolloutConfig(steps=50, trajectories=4, show_progress=False)
 
     from certiqnet.adapters.queueing.adapter import QueueingAdapter
     adapter = QueueingAdapter(assumptions_satisfied=True)
@@ -581,7 +580,7 @@ def test_collapse_scenario(t: TestResult) -> None:
     # Evaluate the collapsed model
     r_collapsed = evaluate_policy(
         name="collapsed", model=collapsed, env_name="hospital", seed=42,
-        N=HOSPITAL_N, lam=HOSPITAL_LAM, mu=mu, rollout=rollout, adapter=adapter,
+        N=HOSPITAL_N, mu=mu, rollout=rollout, adapter=adapter,
     )
     f_collapsed = r_collapsed.flat()
 
@@ -589,7 +588,7 @@ def test_collapse_scenario(t: TestResult) -> None:
     mw = MaxWeight(N=HOSPITAL_N)
     r_mw = evaluate_policy(
         name="max_weight", model=mw, env_name="hospital", seed=42,
-        N=HOSPITAL_N, lam=HOSPITAL_LAM, mu=mu, rollout=rollout, adapter=adapter,
+        N=HOSPITAL_N, mu=mu, rollout=rollout, adapter=adapter,
     )
     f_mw = r_mw.flat()
 
@@ -617,7 +616,7 @@ def test_collapse_scenario(t: TestResult) -> None:
     sed = ShortestExpectedDelay(N=HOSPITAL_N)
     r_sed = evaluate_policy(
         name="sed", model=sed, env_name="hospital", seed=42,
-        N=HOSPITAL_N, lam=HOSPITAL_LAM, mu=mu, rollout=rollout, adapter=adapter,
+        N=HOSPITAL_N, mu=mu, rollout=rollout, adapter=adapter,
     )
     f_sed = r_sed.flat()
     if abs(float(f_sed.get(key, -1)) - val_m) < 1e-6:
