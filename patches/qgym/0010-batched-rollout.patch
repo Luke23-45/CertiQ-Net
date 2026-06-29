@@ -1,31 +1,20 @@
 diff --git a/main/env.py b/main/env.py
-index 8eaef1d..a4d0c7f 100644
+index 44cc9ab..2529268 100644
 --- a/main/env.py
 +++ b/main/env.py
-@@ -30,8 +30,8 @@ class STargmin(nn.Module):
-         self.softmax = nn.Softmax(dim = 0)
-     
-     def forward(self, x):
--        if not x.requires_grad:
+@@ -40,7 +40,7 @@ class STargmin(nn.Module):
+         # Cast to float so the output dtype matches the grad path (one_hot is
+         # int64; the softmax arithmetic in the grad path promotes to float).
+         if not x.requires_grad:
 -            return F.one_hot(torch.argmin(x), num_classes = x.size()[1]).float()
-+        if not x.requires_grad:
 +            return F.one_hot(torch.argmin(x, dim=-1), num_classes = x.size()[-1]).float()
          return F.one_hot(torch.argmin(x), num_classes = x.size()[1]) - self.softmax(-x/self.temp).detach() + self.softmax(-x/self.temp)
      
  def allocator(action, mu, queue_service_times):
-@@ -433,7 +433,155 @@ class DiffDiscreteEventSystem(gym.Env):
-     def get_observation(self):
-         return self.queues
-         
-     def print_state(self):
-         print(f"Total Cost:\t{self.cost}")
-         print(f"Time Elapsed:\t{self.time_elapsed}")
-         print(f"Queue Len:\t{self.queues}")
-         print(f"Service times:\t{self.st_data}")
+@@ -406,3 +406,190 @@ class DiffDiscreteEventSystem(gym.Env):
          print(f"Arrival times:\t{self.arrival_times}")
          # else:
          #     print(f"Work:\t{self.work}")
-+
 +
 +class BatchedEnv:
 +    """Batch-safe QGym env for training rollouts.

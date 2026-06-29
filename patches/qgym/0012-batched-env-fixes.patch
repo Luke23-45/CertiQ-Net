@@ -2,8 +2,7 @@ diff --git a/main/env.py b/main/env.py
 index a4d0c7f..b5b0f12 100644
 --- a/main/env.py
 +++ b/main/env.py
-@@ -40,8 +40,8 @@ class STargmin(nn.Module):
-         # Cast to float so the output dtype matches the grad path (one_hot is
+@@ -41,7 +41,7 @@ class STargmin(nn.Module):
          # int64; the softmax arithmetic in the grad path promotes to float).
          if not x.requires_grad:
              return F.one_hot(torch.argmin(x, dim=-1), num_classes = x.size()[-1]).float()
@@ -11,20 +10,21 @@ index a4d0c7f..b5b0f12 100644
 +        return F.one_hot(torch.argmin(x, dim=-1), num_classes = x.size()[-1]) - self.softmax(-x/self.temp).detach() + self.softmax(-x/self.temp)
      
  def allocator(action, mu, queue_service_times):
-@@ -456,6 +456,7 @@ class BatchedEnv:
-         f_hook=False,
+     
+@@ -433,6 +433,7 @@ class BatchedEnv:
          f_verbose=False,
          reset=False,
          use_sb=False,
 +        **kwargs,
      ):
-@@ -507,9 +508,9 @@ class BatchedEnv:
+         self.device = torch.device(device) if isinstance(device, str) else device
+         self.batch = int(batch)
+@@ -504,7 +505,7 @@ class BatchedEnv:
                  count = int(self.st_counts[b, q].item())
                  if count <= 0:
                      continue
--                samples = self.draw_service(time)
+-                samples = self.draw_service(time[b:b+1]) if time.shape[0] > 1 else self.draw_service(time[b:b+1])
++                samples = self.draw_service(time)
                  for j in range(count):
--                    self.st_data[b, q, j] = samples[b, q] if samples.dim() == 2 else samples[0, q]
-+                    samples = self.draw_service(time)
-+                    self.st_data[b, q, j] = samples[b, q] if samples.dim() == 2 else samples[0, q]
+                     self.st_data[b, q, j] = samples[b, q] if samples.dim() == 2 else samples[0, q]
          self.arrival_times = self.draw_inter_arrivals(time)
