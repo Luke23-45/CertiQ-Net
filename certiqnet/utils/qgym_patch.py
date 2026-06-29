@@ -168,51 +168,6 @@ _HUNKS.append(
 # ── Patch application ─────────────────────────────────────────────────────
 
 
-# -- Hunk 4: batch-aware env import ------------------------------------------
-
-_HUNKS.append(
-    (
-        # old
-        "from main.env import DiffDiscreteEventSystem\n",
-        # new
-        "from main.env import BatchedEnv, DiffDiscreteEventSystem\n",
-    )
-)
-
-# -- Hunk 5: choose batched env for batch > 1 --------------------------------
-
-_HUNKS.append(
-    (
-        # old
-        "    dq = RL_Wrapper_P_DiffDiscreteEventSystem(network, mu, h, \n"
-        "                                       draw_service= draw_service, draw_inter_arrivals = draw_inter_arrivals, init_time = 0, \n"
-        "                                    queue_event_options= queue_event_options,\n"
-        "                                    batch = batch, \n"
-        "                                    temp = temp, seed = seed,\n"
-        "                                    time_f = False,\n"
-        "                                    reward_scale = 1.0,\n"
-        "                                    policy_name= policy_name,\n"
-        "                                    action_map = None,\n"
-        "                                    device = torch.device(device))\n"
-        "\n"
-        "    return dq\n",
-        # new
-        "    env_cls = BatchedEnv if batch > 1 else RL_Wrapper_P_DiffDiscreteEventSystem\n"
-        "    dq = env_cls(network, mu, h,\n"
-        "                 draw_service=draw_service, draw_inter_arrivals=draw_inter_arrivals, init_time=0,\n"
-        "                 queue_event_options=queue_event_options,\n"
-        "                 batch=batch,\n"
-        "                 temp=temp, seed=seed,\n"
-        "                 time_f=False,\n"
-        "                 reward_scale=1.0,\n"
-        "                 policy_name=policy_name,\n"
-        "                 action_map=None,\n"
-        "                 device=torch.device(device))\n"
-        "\n"
-        "    return dq\n",
-    )
-)
-
 def apply_qgym_patches() -> None:
     """Restore the original ``rl_env.py``, then apply all tracked hunks.
 
