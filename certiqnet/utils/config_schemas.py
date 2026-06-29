@@ -36,7 +36,7 @@ class TrainerConfig:
     devices: int = 1
     precision: str = "bf16-mixed"
     gradient_clip_val: float = 0.0
-    val_check_interval: float = 0.25
+    val_check_interval: float = 1.0
     log_every_n_steps: int = 10
 
 

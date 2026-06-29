@@ -1,0 +1,13 @@
+diff --git a/main/env.py b/main/env.py
+index 5420437..e2d1a5c 100644
+--- a/main/env.py
++++ b/main/env.py
+@@ -27,7 +27,7 @@ class STargmin(nn.Module):
+     def __init__(self, temp):
+         super().__init__()
+         self.temp = temp
+-        self.softmax = nn.Softmax(dim = 0)
++        self.softmax = nn.Softmax(dim = -1)
+     
+     def forward(self, x):
+         return F.one_hot(torch.argmin(x), num_classes = x.size()[1]) - self.softmax(-x/self.temp).detach() + self.softmax(-x/self.temp)

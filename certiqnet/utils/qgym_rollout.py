@@ -42,9 +42,9 @@ def as_batch_tensor(value: object, *, device: torch.device, dtype: torch.dtype =
 
 def extract_qgym_queues(obs: object, info: dict[str, object] | None, *, device: torch.device) -> Tensor:
     """Return the queue tensor from a QGym step."""
-    if info is not None and "queues" in info:
+    if isinstance(info, dict) and "queues" in info:
         return as_batch_tensor(info["queues"], device=device)
-    if info is not None and "Q" in info:
+    if isinstance(info, dict) and "Q" in info:
         return as_batch_tensor(info["Q"], device=device)
     return as_batch_tensor(obs, device=device)
 

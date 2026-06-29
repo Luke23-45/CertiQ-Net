@@ -1,0 +1,215 @@
+diff --git a/main/env.py b/main/env.py
+index 8eaef1d..a4d0c7f 100644
+--- a/main/env.py
++++ b/main/env.py
+@@ -30,8 +30,8 @@ class STargmin(nn.Module):
+         self.softmax = nn.Softmax(dim = 0)
+     
+     def forward(self, x):
+-        if not x.requires_grad:
+-            return F.one_hot(torch.argmin(x), num_classes = x.size()[1]).float()
++        if not x.requires_grad:
++            return F.one_hot(torch.argmin(x, dim=-1), num_classes = x.size()[-1]).float()
+         return F.one_hot(torch.argmin(x), num_classes = x.size()[1]) - self.softmax(-x/self.temp).detach() + self.softmax(-x/self.temp)
+     
+ def allocator(action, mu, queue_service_times):
+@@ -433,7 +433,155 @@ class DiffDiscreteEventSystem(gym.Env):
+     def get_observation(self):
+         return self.queues
+         
+     def print_state(self):
+         print(f"Total Cost:\t{self.cost}")
+         print(f"Time Elapsed:\t{self.time_elapsed}")
+         print(f"Queue Len:\t{self.queues}")
+         print(f"Service times:\t{self.st_data}")
+         print(f"Arrival times:\t{self.arrival_times}")
+         # else:
+         #     print(f"Work:\t{self.work}")
++
++
++class BatchedEnv:
++    """Batch-safe QGym env for training rollouts.
++
++    It keeps one independent event simulation per batch item while
++    sharing the Python control path for the outer rollout loop.
++    """
++
++    def __init__(
++        self,
++        network,
++        mu,
++        h,
++        draw_service,
++        draw_inter_arrivals,
++        init_time=0,
++        batch=1,
++        queue_event_options=None,
++        straight_through_min=False,
++        queue_lim=None,
++        temp=1,
++        seed=3003,
++        device="cpu",
++        f_hook=False,
++        f_verbose=False,
++        reset=False,
++        use_sb=False,
++    ):
++        self.device = torch.device(device) if isinstance(device, str) else device
++        self.batch = int(batch)
++        self.q = network.size()[-1]
++        self.s = network.size()[-2]
++        self.network = network.repeat(self.batch, 1, 1).to(self.device)
++        self.mu = mu.repeat(self.batch, 1, 1).to(self.device)
++        self.h = torch.as_tensor(h, dtype=torch.float32, device=self.device)
++        self.temp = temp
++        self.st_argmin = STargmin(temp=self.temp)
++        self.f_hook = f_hook
++        self.f_verbose = f_verbose
++        self.straight_through_min = straight_through_min
++        self.eps = 1e-8
++        self.inv_eps = 1 / self.eps
++        self.use_sb = use_sb
++        self.queue_event_options = (
++            torch.cat((F.one_hot(torch.arange(0, self.q)), -F.one_hot(torch.arange(0, self.q))))
++            .float()
++            .to(self.device)
++            if queue_event_options is None
++            else queue_event_options.float().to(self.device)
++        )
++        self.state = torch.Generator(device=self.device)
++        if seed is not None:
++            self.state.manual_seed(seed)
++        self.draw_service_core = draw_service
++        self.draw_inter_arrivals_core = draw_inter_arrivals
++        self.reset(seed=seed)
++
++    def draw_service(self, time):
++        return self.draw_service_core(self, time)
++
++    def draw_inter_arrivals(self, time):
++        return self.draw_inter_arrivals_core(self, time)
++
++    def reset(self, init_queues=None, time=None, seed=None, options: dict = None):
++        if time is None:
++            time = torch.zeros((self.batch, 1), device=self.device)
++        else:
++            time = torch.as_tensor(time, dtype=torch.float32, device=self.device)
++            if time.dim() == 0:
++                time = time.reshape(1, 1).expand(self.batch, 1)
++            elif time.dim() == 1:
++                time = time.unsqueeze(-1)
++                if time.shape[0] == 1 and self.batch > 1:
++                    time = time.expand(self.batch, 1)
++
++        if init_queues is None:
++            queues = torch.zeros((self.batch, self.q), dtype=torch.float32, device=self.device)
++        else:
++            queues = torch.as_tensor(init_queues, dtype=torch.float32, device=self.device)
++            if queues.dim() == 1:
++                queues = queues.unsqueeze(0)
++            if queues.shape[0] == 1 and self.batch > 1:
++                queues = queues.expand(self.batch, -1).clone()
++
++        if seed is not None:
++            self.state = torch.Generator(device=self.device)
++            self.state.manual_seed(seed)
++
++        self.queues = queues
++        self.time_elapsed = time
++        self.st_counts = queues.long()
++        max_init = max(int(self.st_counts.max().item()), 1)
++        self.st_data = torch.zeros((self.batch, self.q, max_init), device=self.device)
++        for b in range(self.batch):
++            for q in range(self.q):
++                count = int(self.st_counts[b, q].item())
++                if count <= 0:
++                    continue
++                samples = self.draw_service(time[b:b+1]) if time.shape[0] > 1 else self.draw_service(time[b:b+1])
++                for j in range(count):
++                    self.st_data[b, q, j] = samples[b, q] if samples.dim() == 2 else samples[0, q]
++        self.arrival_times = self.draw_inter_arrivals(time)
++        self.obs = Obs(self.queues, time)
++        self.env_state = EnvState(self.queues, time, self.st_data, self.arrival_times)
++        return self.obs, self.env_state
++
++    def step(self, actions):
++        state = self.env_state
++        queues, time, _, arrival_times = state
++        if self.use_sb:
++            actions = torch.as_tensor(actions, dtype=torch.float32, device=self.device)
++        actions = actions * self.network
++        actions = torch.minimum(actions, queues.unsqueeze(1).expand(-1, self.s, -1))
++
++        max_n = int(self.st_counts.max().item())
++        allocated_work = torch.zeros((self.batch, self.q, max_n), device=self.device)
++        num_allocated = torch.zeros((self.batch, self.q), dtype=torch.int64, device=self.device)
++        for b in range(self.batch):
++            st_counts_list = [int(x) for x in self.st_counts[b].tolist()]
++            aw_b, _, na_b = allocator(actions[b:b+1], self.mu[b:b+1], st_counts_list)
++            for q in range(self.q):
++                n = int(na_b[q])
++                num_allocated[b, q] = n
++                if n > 0:
++                    allocated_work[b, q, :n] = torch.stack(aw_b[q])
++
++        if max_n > 0:
++            st_slice = self.st_data[:, :, :max_n]
++            aw_slice = allocated_work[:, :, :max_n].clamp_min(self.eps)
++            mask = torch.arange(max_n, device=self.device).view(1, 1, -1) < num_allocated.unsqueeze(-1)
++            ratio = st_slice / aw_slice
++            ratio[~mask] = float("inf")
++            min_eff_service_times = ratio.min(dim=-1).values
++            min_eff_service_times = torch.where(
++                num_allocated > 0,
++                min_eff_service_times,
++                torch.full_like(min_eff_service_times, self.inv_eps),
++            )
++            which_job = ratio.argmin(dim=-1)
++        else:
++            min_eff_service_times = torch.full((self.batch, self.q), self.inv_eps, device=self.device)
++            which_job = torch.zeros((self.batch, self.q), dtype=torch.int64, device=self.device)
++
++        event_times = torch.cat((arrival_times, min_eff_service_times), dim=1).float()
++        outcome = self.st_argmin(event_times)
++        delta_q = torch.matmul(outcome, self.queue_event_options)
++        event_time = event_times.min(dim=1).values
++        time = time + event_time.unsqueeze(-1)
++        cost = torch.matmul(event_time.unsqueeze(-1) * queues, self.h)
++        queues = F.relu(queues + delta_q)
++
++        if max_n > 0:
++            self.st_data[:, :, :max_n] = self.st_data[:, :, :max_n] - event_time.view(-1, 1, 1) * allocated_work[:, :, :max_n]
++
++        arrival_times = arrival_times - event_time.unsqueeze(-1)
++        delta = delta_q.int()
++        has_arrival = (delta == 1).any(dim=1)
++        if has_arrival.any():
++            new_arrival_times = self.draw_inter_arrivals(time)
++            new_service_times = self.draw_service(time)
++            for b in torch.where(has_arrival)[0].tolist():
++                which_arrival = int(torch.argmax(delta[b].clamp_min(0)).item())
++                c = int(self.st_counts[b, which_arrival].item())
++                if c >= self.st_data.size(-1):
++                    pad = torch.zeros((self.batch, self.q, 1), device=self.device)
++                    self.st_data = torch.cat([self.st_data, pad], dim=-1)
++                self.st_data[b, which_arrival, c] = new_service_times[b, which_arrival]
++                self.st_counts[b, which_arrival] = c + 1
++                arrival_times[b, which_arrival] = new_arrival_times[b, which_arrival]
++
++        has_departure = (delta == -1).any(dim=1)
++        if has_departure.any():
++            for b in torch.where(has_departure)[0].tolist():
++                dq = int(torch.argmin(min_eff_service_times[b]).item())
++                j = int(which_job[b, dq].item())
++                c = int(self.st_counts[b, dq].item())
++                if j < c - 1:
++                    self.st_data[b, dq, j:c-1] = self.st_data[b, dq, j+1:c].detach().clone()
++                self.st_counts[b, dq] = c - 1
++
++        self.time_elapsed = time
++        self.queues = queues
++        self.arrival_times = arrival_times
++        self.obs = Obs(queues, time)
++        self.env_state = EnvState(queues, time, self.st_data, arrival_times)
++        info = {"obs": self.obs, "state": self.env_state, "cost": cost, "event_time": event_time, "queues": queues}
++        return queues.cpu().detach().numpy(), -cost, False, False, info

@@ -64,6 +64,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         qgym_seed: int = 0,
         gamma: float = 0.99,
         val_horizon_max: int = 64,
+        validate_dataset_start: bool = False,
     ) -> None:
         super().__init__()
         self.model = model
@@ -77,6 +78,8 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self.qgym_seed = int(qgym_seed)
         self.gamma = float(gamma)
         self.val_horizon_max = int(val_horizon_max)
+        self.validate_dataset_start = bool(validate_dataset_start)
+        self._qgym_env_cache: dict[tuple[str, int], object] = {}
         if hasattr(self, "save_hyperparameters"):
             self.save_hyperparameters(ignore=["model", "loss_fn"])
 
@@ -143,9 +146,17 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             device=device,
         )
 
+    def _get_qgym_env(self, device: torch.device, batch_size: int) -> object:
+        cache_key = (str(torch.device(device)), int(batch_size))
+        env = self._qgym_env_cache.get(cache_key)
+        if env is None:
+            env = self._build_qgym_env(batch_size=batch_size, device=torch.device(device))
+            self._qgym_env_cache[cache_key] = env
+        return env
+
     # ── Training step ───────────────────────────────────────────────
 
-    def _run_qgym_rollout_single(
+    def _run_qgym_rollout_batch(
         self,
         init_Q: Tensor,
         init_mu: Tensor,
@@ -154,23 +165,20 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         *,
         training_mode: bool,
         sample_actions: bool,
-    ) -> tuple[
-        DispatcherDiagnostics,
-        Tensor,
-        Tensor,
-        list[Tensor],
-        list[Tensor],
-    ]:
-        """Run one QGym rollout for a single sample."""
+    ) -> tuple[DispatcherDiagnostics, Tensor, Tensor, Tensor, Tensor]:
+        """Run one batched QGym rollout for the full training/validation batch."""
         if hasattr(self.model, "reset_dispatch_state"):
             self.model.reset_dispatch_state()
 
-        env = self._build_qgym_env(batch_size=1, device=init_Q.device)
-        env.reset(init_queues=init_Q.detach().clone().unsqueeze(0))
+        batch_size = int(init_Q.shape[0])
+        env = self._get_qgym_env(init_Q.device, batch_size=batch_size)
+        env.reset(init_queues=init_Q.detach().clone(), seed=self.qgym_seed)
 
-        history_Q: deque[Tensor] = deque([init_Q.detach().clone().unsqueeze(0)], maxlen=max(2, min(4, horizon)))
+        history_Q: deque[Tensor] = deque([init_Q.detach().clone()], maxlen=max(2, min(4, horizon)))
         history_action: deque[Tensor] = deque(maxlen=max(2, min(4, horizon)))
         history_dt: deque[Tensor] = deque(maxlen=max(2, min(4, horizon)))
+        mu_obs = as_batch_tensor(init_mu, device=init_Q.device)
+        num_classes = int(init_Q.shape[-1])
 
         policy_diagnostics: list[DispatcherDiagnostics] = []
         log_probs: list[Tensor] = []
@@ -179,12 +187,11 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         cost_trace: list[Tensor] = []
         dt_trace: list[Tensor] = []
 
-        context = nullcontext() if training_mode else torch.no_grad()
+        context = nullcontext() if training_mode else torch.inference_mode()
         with context:
             for _ in range(horizon):
                 current_q = env.obs.queues if hasattr(env, "obs") else env.env_state.queues
                 Q_raw = as_batch_tensor(current_q, device=init_Q.device)
-                mu_obs = as_batch_tensor(init_mu, device=init_Q.device)
                 xi_obs = self._rollout_context(
                     Q_raw,
                     mu_obs,
@@ -203,7 +210,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 else:
                     action_idx = out.pi.argmax(dim=-1)
 
-                action_pi = F.one_hot(action_idx, num_classes=int(init_Q.shape[-1])).float()
+                action_pi = F.one_hot(action_idx, num_classes=num_classes).float()
                 action = qgym_action_from_pi(action_pi, env.network, Q_raw, sample=False)
                 step_obs, _reward, _done, _truncated, info = env.step(action)
                 step_Q = extract_qgym_queues(step_obs, info, device=init_Q.device)
@@ -220,12 +227,14 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
                 history_Q.append(step_Q.detach())
 
         diag = _stack_mean(policy_diagnostics)
-        backlog = torch.cat(queue_trace, dim=0).sum(dim=-1).float()
-        cost_t = torch.cat(cost_trace, dim=0).float()
-        dt_t = torch.cat(dt_trace, dim=0).float()
-        avg_cost = self.loss_fn.rollout_cost(cost_t, dt_t)
-        p95_backlog = backlog.quantile(0.95)
-        return diag, avg_cost, p95_backlog, log_probs, rewards
+        backlog = torch.stack([q.sum(dim=-1) for q in queue_trace], dim=1).float()
+        cost_t = torch.stack(cost_trace, dim=1).float()
+        dt_t = torch.stack(dt_trace, dim=1).float()
+        avg_cost = self.loss_fn.rollout_cost(cost_t.reshape(-1), dt_t.reshape(-1))
+        p95_backlog = backlog.quantile(0.95, dim=1).mean()
+        log_probs_t = torch.stack(log_probs, dim=1) if log_probs else torch.zeros(batch_size, horizon, device=init_Q.device)
+        rewards_t = torch.stack(rewards, dim=1)
+        return diag, avg_cost, p95_backlog, log_probs_t, rewards_t
 
     def training_step(self, batch: dict[str, Tensor], batch_idx: int) -> Tensor | None:
         del batch_idx
@@ -238,36 +247,19 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self._log_diagnostics(init_out.diagnostics, "train")
 
         # Rollout-cost optimization via QGym REINFORCE.
-        rollout_diagnostics: list[DispatcherDiagnostics] = []
-        rollout_log_probs: list[Tensor] = []
-        rollout_returns: list[Tensor] = []
-
-        for sample_idx in range(Q0.shape[0]):
-            sample_Q = Q0[sample_idx]
-            sample_mu = mu0[sample_idx]
-            sample_xi = xi0[sample_idx] if xi0 is not None else None
-            diag, _avg_cost, _p95_backlog, log_probs, rewards = self._run_qgym_rollout_single(
-                sample_Q,
-                sample_mu,
-                sample_xi,
-                self.rollout_horizon,
-                training_mode=True,
-                sample_actions=True,
-            )
-            rollout_diagnostics.append(diag)
-            sample_rewards = torch.stack(rewards, dim=0)
-            sample_log_probs = torch.stack(log_probs, dim=0)
-            sample_returns = torch.zeros_like(sample_rewards)
-            running = torch.zeros_like(sample_rewards[0])
-            for t in reversed(range(self.rollout_horizon)):
-                running = sample_rewards[t] + self.gamma * running
-                sample_returns[t] = running
-            rollout_log_probs.append(sample_log_probs)
-            rollout_returns.append(sample_returns)
-
-        log_probs_t = torch.cat(rollout_log_probs, dim=0)
-        returns = torch.cat(rollout_returns, dim=0)
-        rollout_diag = _stack_mean(rollout_diagnostics)
+        rollout_diag, _avg_cost, _p95_backlog, log_probs_t, rewards_t = self._run_qgym_rollout_batch(
+            Q0,
+            mu0,
+            xi0,
+            self.rollout_horizon,
+            training_mode=True,
+            sample_actions=True,
+        )
+        returns = torch.zeros_like(rewards_t)
+        running = torch.zeros(rewards_t.shape[0], device=rewards_t.device, dtype=rewards_t.dtype)
+        for t in reversed(range(self.rollout_horizon)):
+            running = rewards_t[:, t] + self.gamma * running
+            returns[:, t] = running
         self._log_diagnostics(rollout_diag, "train_rollout")
 
         losses = self.loss_fn(
@@ -299,37 +291,17 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
             init_xi: Tensor | None,
             horizon: int,
         ) -> tuple[DispatcherDiagnostics, Tensor, Tensor, Tensor, Tensor]:
-            diags: list[DispatcherDiagnostics] = []
-            avg_costs: list[Tensor] = []
-            p95_backlogs: list[Tensor] = []
-            violations: list[Tensor] = []
-            violation_rates: list[Tensor] = []
-
-            for sample_idx in range(init_Q.shape[0]):
-                sample_Q = init_Q[sample_idx]
-                sample_mu = init_mu[sample_idx]
-                sample_xi = init_xi[sample_idx] if init_xi is not None else None
-                diag, avg_cost, p95_backlog, _log_probs, _rewards = self._run_qgym_rollout_single(
-                    sample_Q,
-                    sample_mu,
-                    sample_xi,
-                    horizon,
-                    training_mode=False,
-                    sample_actions=False,
-                )
-                diags.append(diag)
-                avg_costs.append(avg_cost)
-                p95_backlogs.append(p95_backlog)
-                violations.append(diag.constraint_violation.mean())
-                violation_rates.append((diag.constraint_violation > 1e-4).float().mean())
-
-            return (
-                _stack_mean(diags),
-                torch.stack(avg_costs).mean(),
-                torch.stack(p95_backlogs).mean(),
-                torch.stack(violations).mean(),
-                torch.stack(violation_rates).mean(),
+            diag, avg_cost, p95_backlog, _log_probs, _rewards = self._run_qgym_rollout_batch(
+                init_Q,
+                init_mu,
+                init_xi,
+                horizon,
+                training_mode=False,
+                sample_actions=False,
             )
+            violation = diag.constraint_violation.mean()
+            violation_rate = (diag.constraint_violation > 1e-4).float().mean()
+            return diag, avg_cost, p95_backlog, violation, violation_rate
 
         zero_Q = torch.zeros_like(Q)
         primary_diag, avg_cost, p95_backlog, violation, violation_rate = _run_rollout(
@@ -343,7 +315,7 @@ class BaseCertiQLightningModule(pl.LightningModule if pl is not None else nn.Mod
         self.log("val/selection_score", selection_score, prog_bar=False)
         self._log_diagnostics(primary_diag, "val")
 
-        if Q.abs().sum().item() > 0:
+        if self.validate_dataset_start and Q.abs().sum().item() > 0:
             aux_diag, aux_avg_cost, aux_p95_backlog, aux_violation, aux_violation_rate = _run_rollout(
                 Q, mu, xi, val_horizon
             )
