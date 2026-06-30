@@ -38,6 +38,10 @@ def apply_qgym_patches(*, reset: bool = True) -> list[Path]:
         raise FileNotFoundError(f"No patch files found in {PATCH_ROOT}")
 
     if reset:
+        update_result = _run_git(["submodule", "update", "--init", "--force"], cwd=REPO_ROOT)
+        if update_result.returncode != 0:
+            raise PatchApplicationError(f"Failed to update submodule:\n{update_result.stderr}")
+            
         reset_result = _run_git(["reset", "--hard", "HEAD"], cwd=SUBMODULE_ROOT)
         if reset_result.returncode != 0:
             raise PatchApplicationError(
@@ -55,12 +59,13 @@ def apply_qgym_patches(*, reset: bool = True) -> list[Path]:
 
     applied: list[Path] = []
     for patch in patch_files:
-        patch_text = patch.read_text(encoding="utf-8").replace("\r\n", "\n")
+        rel_patch = Path(os.path.relpath(patch, SUBMODULE_ROOT))
+        
         result = _run_git(
-            ["apply", "--recount", "--whitespace=nowarn", "--ignore-space-change", "--ignore-whitespace", "-"], 
-            cwd=SUBMODULE_ROOT, 
-            input_text=patch_text
+            ["apply", "--recount", "--whitespace=nowarn", "--ignore-space-change", "--ignore-whitespace", str(rel_patch)], 
+            cwd=SUBMODULE_ROOT
         )
+
         if result.returncode != 0:
             raise PatchApplicationError(
                 f"Failed to apply patch {patch.name}.\n"
