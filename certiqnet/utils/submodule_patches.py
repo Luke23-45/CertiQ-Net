@@ -55,7 +55,7 @@ def apply_qgym_patches(*, reset: bool = True) -> list[Path]:
     applied: list[Path] = []
     for patch in patch_files:
         rel_patch = Path(os.path.relpath(patch, SUBMODULE_ROOT))
-        result = _run_git(["apply", "--recount", "--whitespace=nowarn", "--ignore-space-change", "--ignore-cr-at-eol", str(rel_patch)], cwd=SUBMODULE_ROOT)
+        result = _run_git(["apply", "--recount", "--whitespace=nowarn", "--ignore-space-change", "--ignore-whitespace", str(rel_patch)], cwd=SUBMODULE_ROOT)
         if result.returncode != 0:
             raise PatchApplicationError(
                 f"Failed to apply patch {patch.name}.\n"
