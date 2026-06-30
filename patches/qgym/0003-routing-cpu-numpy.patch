@@ -26,11 +26,3 @@ index 1c8d05b..fbf2194 100644
  
          A = match_constraint_mat(s, q).toarray()
          c = np.reshape(-v, s * q)
-@@ -388,4 +388,4 @@ class Sinkhorn(torch.autograd.Function):
- #             p_hot = torch.exp(log_p_hot)[:,:self.s,:self.q]
-             
- #             return p.detach() + p_hot - p_hot.detach()
--            
-\ No newline at end of file
-+            
-

@@ -2,23 +2,21 @@ diff --git a/policies/fluid.py b/policies/fluid.py
 index 47bd8ff..b3ea616 100644
 --- a/policies/fluid.py
 +++ b/policies/fluid.py
-@@ -20,13 +20,13 @@ def FluidSolver(obs, H, s, q, h, mu, queue_event_options, delta_t = 1):
-     
+@@ -20,13 +20,10 @@ def FluidSolver(obs, H, s, q, h, mu, queue_event_options, delta_t = 1):
      # eval batch is either 1 or equal to dq.batch
      queues, time = obs
 -    queues = queues.detach().numpy()
-+    queues = queues.detach().cpu().numpy()
- 
+-
 -    h = h.numpy()
 -    A = queue_event_options[q:].numpy()
 -    mu_flat = mu.numpy().flatten()
+-
+-    start_time = time[0].detach().numpy()
++    queues = queues.detach().cpu().numpy()
 +    h = h.detach().cpu().numpy()
 +    A = queue_event_options[q:].detach().cpu().numpy()
 +    mu_flat = mu.detach().cpu().numpy().flatten()
- 
--    start_time = time[0].detach().numpy()
 +    start_time = time[0].detach().cpu().numpy()
      N = round(H / delta_t)
  
      x = cvx.Variable((N, q))
-

@@ -47,4 +47,3 @@ index ce83bbc..46e2777 100644
              return state.exponential(1, (batch, orig_q))
          service = torch.tensor(service_dists(self.state, self.batch, time)).to(self.device)
          return service
-

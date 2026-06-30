@@ -10,6 +10,8 @@ Patches applied
 1. ``lam(t)`` → ``lam(t, rng=None, batch=None)``, adding ``elif lam_type == 'hyper':``
 2. ``draw_inter_arrivals`` — pass ``rng`` / ``batch`` to ``lam()``
 3. ``draw_service`` — add ``service_type == 'hyper'`` branch
+4. ``BatchedEnv`` import in ``RL/utils/rl_env.py``
+5. ``load_rl_p_env`` dispatches ``batch > 1`` to ``BatchedEnv``
 """
 
 from __future__ import annotations
@@ -161,6 +163,51 @@ _HUNKS.append(
         "            return state.exponential(1, (batch, orig_q))\n"
         "        service = torch.tensor(service_dists(self.state, self.batch, time)).to(self.device)\n"
         "        return service\n",
+    )
+)
+
+# -- Hunk 4: preserve BatchedEnv import -------------------------------------
+
+_HUNKS.append(
+    (
+        # old
+        "from main.env import DiffDiscreteEventSystem\n",
+        # new
+        "from main.env import BatchedEnv, DiffDiscreteEventSystem\n",
+    )
+)
+
+# -- Hunk 5: select BatchedEnv for batched rollouts --------------------------
+
+_HUNKS.append(
+    (
+        # old
+        "    dq = RL_Wrapper_P_DiffDiscreteEventSystem(network, mu, h, \n"
+        "                                       draw_service= draw_service, draw_inter_arrivals = draw_inter_arrivals, init_time = 0, \n"
+        "                                    queue_event_options= queue_event_options,\n"
+        "                                    batch = batch, \n"
+        "                                    temp = temp, seed = seed,\n"
+        "                                    time_f = False,\n"
+        "                                    reward_scale = 1.0,\n"
+        "                                    policy_name= policy_name,\n"
+        "                                    action_map = None,\n"
+        "                                    device = torch.device(device))\n"
+        "\n"
+        "    return dq",
+        # new
+        "    env_cls = BatchedEnv if batch > 1 else RL_Wrapper_P_DiffDiscreteEventSystem\n"
+        "    dq = env_cls(network, mu, h,\n"
+        "                 draw_service=draw_service, draw_inter_arrivals=draw_inter_arrivals, init_time=0,\n"
+        "                 queue_event_options=queue_event_options,\n"
+        "                 batch=batch,\n"
+        "                 temp=temp, seed=seed,\n"
+        "                 time_f=False,\n"
+        "                 reward_scale=1.0,\n"
+        "                 policy_name=policy_name,\n"
+        "                 action_map=None,\n"
+        "                 device=torch.device(device))\n"
+        "\n"
+        "    return dq\n",
     )
 )
 

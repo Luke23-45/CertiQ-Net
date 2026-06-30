@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -53,7 +54,8 @@ def apply_qgym_patches(*, reset: bool = True) -> list[Path]:
 
     applied: list[Path] = []
     for patch in patch_files:
-        result = _run_git(["apply", "--whitespace=nowarn", str(patch.resolve())], cwd=SUBMODULE_ROOT)
+        rel_patch = Path(os.path.relpath(patch, SUBMODULE_ROOT))
+        result = _run_git(["apply", "--recount", "--whitespace=nowarn", str(rel_patch)], cwd=SUBMODULE_ROOT)
         if result.returncode != 0:
             raise PatchApplicationError(
                 f"Failed to apply patch {patch.name}.\n"
@@ -62,4 +64,3 @@ def apply_qgym_patches(*, reset: bool = True) -> list[Path]:
             )
         applied.append(patch)
     return applied
-

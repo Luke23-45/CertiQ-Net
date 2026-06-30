@@ -193,22 +193,27 @@ def evaluate_policy(
     evaluation_start = "qgym_test" if qgym_test_states is not None else "env_reset"
     test_states = qgym_test_states.float() if qgym_test_states is not None else None
 
+    def _select_test_batch(states: Tensor, batch_size: int) -> Tensor:
+        if states.shape[0] >= batch_size:
+            return states[:batch_size]
+        idx = torch.arange(batch_size, device=states.device) % states.shape[0]
+        return states[idx]
+
     iterator = progress(
-        range(n_trajectories),
-        total=n_trajectories,
+        range(1),
+        total=1,
         desc=f"qgym:{name}",
         disable=not rollout.show_progress,
     )
-    for traj_idx in iterator:
+    for _ in iterator:
         env = build_qgym_rollout_env(
             qgym_env_config,
-            batch=1,
-            seed=seed + traj_idx,
+            batch=n_trajectories,
+            seed=seed,
             device=rollout_device,
         )
         if test_states is not None and test_states.numel() > 0:
-            init_idx = traj_idx % test_states.shape[0]
-            env.reset(test_states[init_idx : init_idx + 1].to(device=rollout_device).clone())
+            env.reset(_select_test_batch(test_states.to(device=rollout_device).clone(), n_trajectories))
         else:
             env.reset()
 
@@ -216,9 +221,9 @@ def evaluate_policy(
         cost_trace: list[Tensor] = []
         dt_trace: list[Tensor] = []
         diagnostics = []
-        diverged = False
+        diverged = torch.zeros(n_trajectories, dtype=torch.bool, device=rollout_device)
 
-        with torch.no_grad():
+        with torch.inference_mode():
             for _ in range(rollout.steps):
                 Q_raw = as_batch_tensor(
                     env.obs.queues if hasattr(env, "obs") else env.env_state.queues,
@@ -235,25 +240,30 @@ def evaluate_policy(
                 action = qgym_action_from_pi(pi, env.network, Q_raw, sample=False)
                 step_obs, _reward, _done, _truncated, info = env.step(action)
                 q_t = extract_qgym_queues(step_obs, info, device=rollout_device)
-                cost_t = as_batch_tensor(info.get("cost", -_reward), device=rollout_device).reshape(-1)
+                cost_t = as_batch_tensor(info.get("cost", _reward), device=rollout_device).reshape(-1)
                 dt_t = as_batch_tensor(info.get("event_time", 1.0), device=rollout_device).reshape(-1)
                 queue_trace.append(Q_raw.detach().cpu())
                 cost_trace.append(cost_t.detach().cpu())
                 dt_trace.append(dt_t.detach().cpu())
                 diagnostics.append(diag)
-                if q_t.sum(dim=-1).max().item() > rollout.max_backlog:
-                    diverged = True
+                diverged |= q_t.sum(dim=-1) > rollout.max_backlog
+                if bool(diverged.all()):
                     break
 
-        backlog = torch.cat(queue_trace, dim=0).sum(dim=-1).float()
-        cost_t = torch.cat(cost_trace, dim=0).float()
-        dt_t = torch.cat(dt_trace, dim=0).float()
-        total_time = dt_t.sum().clamp_min(1e-9)
-        trajectory_costs.append(float(cost_t.sum().div(total_time).item()))
-        trajectory_backlogs.append(float((backlog * dt_t).sum().div(total_time).item()))
-        trajectory_p95.append(float(backlog.quantile(0.95).item()))
-        trajectory_p99.append(float(backlog.quantile(0.99).item()))
-        trajectory_diverged.append(diverged)
+        queue_trace_t = torch.stack(queue_trace, dim=0)
+        cost_trace_t = torch.stack(cost_trace, dim=0)
+        dt_trace_t = torch.stack(dt_trace, dim=0)
+        backlog_t = queue_trace_t.sum(dim=-1).float()
+        total_time = dt_trace_t.sum(dim=0).clamp_min(1e-9)
+        trajectory_costs.extend(
+            (cost_trace_t.sum(dim=0) / total_time).tolist()
+        )
+        trajectory_backlogs.extend(
+            ((backlog_t * dt_trace_t).sum(dim=0) / total_time).tolist()
+        )
+        trajectory_p95.extend(backlog_t.quantile(0.95, dim=0).tolist())
+        trajectory_p99.extend(backlog_t.quantile(0.99, dim=0).tolist())
+        trajectory_diverged.extend(diverged.detach().cpu().tolist())
         all_diagnostics.extend(diagnostics)
 
     def _stderr(values: list[float]) -> float:

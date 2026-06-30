@@ -2,15 +2,6 @@ diff --git a/main/env.py b/main/env.py
 index a4d0c7f..b5b0f12 100644
 --- a/main/env.py
 +++ b/main/env.py
-@@ -41,7 +41,7 @@ class STargmin(nn.Module):
-         # int64; the softmax arithmetic in the grad path promotes to float).
-         if not x.requires_grad:
-             return F.one_hot(torch.argmin(x, dim=-1), num_classes = x.size()[-1]).float()
--        return F.one_hot(torch.argmin(x), num_classes = x.size()[1]) - self.softmax(-x/self.temp).detach() + self.softmax(-x/self.temp)
-+        return F.one_hot(torch.argmin(x, dim=-1), num_classes = x.size()[-1]) - self.softmax(-x/self.temp).detach() + self.softmax(-x/self.temp)
-     
- def allocator(action, mu, queue_service_times):
-     
 @@ -433,6 +433,7 @@ class BatchedEnv:
          f_verbose=False,
          reset=False,
