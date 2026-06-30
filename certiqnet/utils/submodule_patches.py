@@ -61,10 +61,18 @@ def apply_qgym_patches(*, reset: bool = True) -> list[Path]:
     for patch in patch_files:
         rel_patch = Path(os.path.relpath(patch, SUBMODULE_ROOT))
         
+        # Try standard cross-platform apply first
         result = _run_git(
-            ["apply", "--3way", "--whitespace=nowarn", str(rel_patch)], 
+            ["apply", "--recount", "--whitespace=nowarn", "--ignore-space-change", "--ignore-whitespace", str(rel_patch)], 
             cwd=SUBMODULE_ROOT
         )
+
+        # Fallback to 3-way merge which is extremely robust on Linux/Colab if blobs match
+        if result.returncode != 0:
+            result = _run_git(
+                ["apply", "--3way", "--whitespace=nowarn", str(rel_patch)], 
+                cwd=SUBMODULE_ROOT
+            )
 
         if result.returncode != 0:
             raise PatchApplicationError(
