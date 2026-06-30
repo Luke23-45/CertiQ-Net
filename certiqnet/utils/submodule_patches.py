@@ -62,7 +62,7 @@ def apply_qgym_patches(*, reset: bool = True) -> list[Path]:
         rel_patch = Path(os.path.relpath(patch, SUBMODULE_ROOT))
         
         result = _run_git(
-            ["apply", "--recount", "--whitespace=nowarn", "--ignore-space-change", "--ignore-whitespace", str(rel_patch)], 
+            ["apply", "--3way", "--whitespace=nowarn", str(rel_patch)], 
             cwd=SUBMODULE_ROOT
         )
 
